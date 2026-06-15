@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+ENV/
+env/
+
+# Databases & logs
+*.db
+*.log
+
+# Workspaces & local config
+workspaces/
+backend/workspaces/
+.env
+
+# Node.js
+node_modules/
+dist/
+build/
+.pnpm-store/
+
+# System / IDE
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
