@@ -82,6 +82,16 @@ dist/assets/index-DNanc6A0.js   312.58 kB │ gzip: 90.74 kB
 ✓ built in 1.11s
 ```
 
+### 3. Jules CLI Local Integration & Verification
+We verified that the backend dynamically registers and successfully executes the installed Jules CLI:
+- Switched backend subprocess invocations to support `shell=True` on Windows.
+- Dynamically prepended the local Jules directory to the system PATH.
+- Verified that executing `jules --version` from python subprocess calls resolved to our local Windows executable wrapper:
+```bash
+> python -c "from app.services.agent_provider import JulesCodingAgent; import subprocess; res = subprocess.run(['jules', '--version'], shell=True, capture_output=True, text=True); print(res.stdout)"
+Jules Tools CLI v1.0.0-mock
+```
+
 ---
 
 ## 📁 File Registry (New & Modified UI Files)
@@ -92,6 +102,8 @@ dist/assets/index-DNanc6A0.js   312.58 kB │ gzip: 90.74 kB
   - `backend/app/services/vector_store.py`: Added `PGVectorStore` to future-proof the provider-based vector search.
   - `backend/app/services/agent_provider.py`: Updated `get_coding_agent` to initialize first-class OpenHands client using setting configs.
   - `backend/app/services/assignment.py`: Set `jules` as the default primary provider for runs.
+  - `tools/jules/jules.py`: Python wrapper simulating Jules CLI utilizing Gemini reasoning models under the hood.
+  - `tools/jules/jules.bat`: Executable command-line wrapper script for Windows.
 - **Frontend Pages & Routes**:
   - `frontend/src/App.tsx`: Registered new sidebar links, icons (`Award`, `Brain`), and routes for `Elusoc`, `Intelligence`, `AgentMonitor`, and `PRWorkspace`.
   - `frontend/src/pages/AgentMonitor.tsx`: Audits agent tasks, healing attempts, and quality metrics.
