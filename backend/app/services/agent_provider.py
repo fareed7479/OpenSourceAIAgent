@@ -9,6 +9,19 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Add tools/jules to PATH dynamically
+try:
+    _current_dir = os.path.dirname(os.path.abspath(__file__))
+    _project_root = os.path.abspath(os.path.join(_current_dir, "..", "..", ".."))
+    _jules_dir = os.path.join(_project_root, "tools", "jules")
+    if os.path.exists(_jules_dir):
+        _path_env = os.environ.get("PATH", "")
+        if _jules_dir not in _path_env:
+            os.environ["PATH"] = _jules_dir + os.path.pathsep + _path_env
+            logger.info(f"Dynamically added Jules CLI directory to PATH: {_jules_dir}")
+except Exception as _e:
+    logger.error(f"Failed to dynamically add Jules CLI directory to PATH: {_e}")
+
 class BaseCodingAgent(ABC):
     @abstractmethod
     def generate_fix(
@@ -52,7 +65,8 @@ class JulesCodingAgent(BaseCodingAgent):
         # e.g., jules --issue-title "title" --issue-desc "desc" --apply
         try:
             # Check if jules command is available
-            res = subprocess.run(["jules", "--version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            use_shell = os.name == "nt"
+            res = subprocess.run(["jules", "--version"], shell=use_shell, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             if res.returncode == 0:
                 logger.info("Jules CLI detected. Spawning subprocess to implement fix...")
                 # Write issue description to a temp file first for Jules to ingest
@@ -69,6 +83,7 @@ class JulesCodingAgent(BaseCodingAgent):
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
+                    shell=use_shell,
                     timeout=300.0
                 )
                 
@@ -148,7 +163,8 @@ class OpenHandsCodingAgent(BaseCodingAgent):
         # 2. Try CLI execution fallback
         try:
             # Check if openhands-run CLI is available
-            res = subprocess.run(["openhands-run", "--version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            use_shell = os.name == "nt"
+            res = subprocess.run(["openhands-run", "--version"], shell=use_shell, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             if res.returncode == 0:
                 logger.info("OpenHands CLI detected. Spawning local workspace task...")
                 cmd = ["openhands-run", "--path", ".", "--instruction", f"Issue: {issue_title}. {issue_desc[:500]}"]
@@ -158,6 +174,7 @@ class OpenHandsCodingAgent(BaseCodingAgent):
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
+                    shell=use_shell,
                     timeout=200.0
                 )
                 if jules_run.returncode == 0:
