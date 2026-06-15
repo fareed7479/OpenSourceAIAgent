@@ -20,12 +20,15 @@ Could you please assign this issue to me?
 
 Thank you."""
 
-def request_issue_assignment(issue_id: str, user_id: str) -> Assignment:
+def request_issue_assignment(issue_id: str, user_id: str, db: Session = None) -> Assignment:
     """
     Posts assignment request comment to GitHub issue.
     Creates Assignment record in the database.
     """
-    db: Session = SessionLocal()
+    is_local = False
+    if db is None:
+        db = SessionLocal()
+        is_local = True
     try:
         issue = db.query(Issue).filter(Issue.id == issue_id).first()
         if not issue:
@@ -99,7 +102,8 @@ def request_issue_assignment(issue_id: str, user_id: str) -> Assignment:
         db.rollback()
         raise e
     finally:
-        db.close()
+        if is_local:
+            db.close()
 
 
 def monitor_assignments_task() -> None:

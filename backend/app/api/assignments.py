@@ -27,7 +27,8 @@ def request_assignment(
     try:
         assignment = request_issue_assignment(
             issue_id=payload.issue_id,
-            user_id=current_user.id
+            user_id=current_user.id,
+            db=db
         )
         
         # Trigger assignment monitoring immediately in the background
