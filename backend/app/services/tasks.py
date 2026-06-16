@@ -1,3 +1,4 @@
+import os
 import logging
 from sqlalchemy.orm import Session
 from app.core.database import SessionLocal
@@ -34,6 +35,9 @@ def clone_and_analyze_repo_task(repo_id: str, github_token: str = None) -> None:
                 git_url=repo.url,
                 github_token=github_token
             )
+            # Verify files exist locally
+            if not os.path.exists(clone_path) or not os.listdir(clone_path):
+                raise ValueError("Cloned directory does not exist or is empty.")
             repo.clone_path = clone_path
         except Exception as e:
             logger.error(f"Error cloning repository {repo.url}: {e}")

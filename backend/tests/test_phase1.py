@@ -88,7 +88,7 @@ class TestPhase1(unittest.TestCase):
         reg_response = self.client.post("/api/v1/repositories/register", json=register_payload, headers=headers)
         self.assertEqual(reg_response.status_code, 201)
         repo_data = reg_response.json()
-        self.assertEqual(repo_data["name"], "test-repo.git")
+        self.assertEqual(repo_data["name"], "test-repo")
         repo_id = repo_data["id"]
         
         # 3. Verify repository shows in list

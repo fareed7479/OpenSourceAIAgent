@@ -1,246 +1,83 @@
-# Implementation Plan: AI-Powered Open Source Contribution Operating System (Phases 11-22)
+# Implementation Plan - Phase 2 Audit, Debugging, and Production Completion
 
-This plan details the architecture, design patterns, database migrations, and API contracts required to upgrade the current platform from a GitHub workflow automator into an autonomous **AI-Powered Open Source Contribution Operating System (OS)**.
+This plan outlines the steps to audit, verify, debug, repair, and complete the Repository Registration and Repository Discovery/Sync workflows.
 
----
+## Problem Description
 
-## 🏗️ Architecture & Core Extensions
-
-We will expand the platform's modular services to implement active self-healing loops, multi-agent orchestration, repository semantic searching, long-term memory, and interactive review interfaces.
-
-```mermaid
-graph TD
-    User([User / Contributor]) <--> Frontend[Vite + React + TS + ShadCN]
-    Frontend <--> Backend[FastAPI Backend]
-    Backend <--> Webhooks[GitHub Webhooks Receiver]
-    Backend <--> DB[(PostgreSQL Database + SQLite)]
-    
-    subgraph Multi-Agent Orchestrator
-        Orchestrator[Workflow Engine]
-        IssueAgent[Issue Agent]
-        AssignmentAgent[Assignment Agent]
-        PlanningAgent[Planning Agent]
-        ContextAgent[Context Agent]
-        CodingAgent[Coding Agent - Jules]
-        ValidationAgent[Validation Agent]
-        ReviewAgent[Review Agent]
-        PRAgent[PR Agent]
-        LearningAgent[Learning Agent]
-    end
-    
-    Orchestrator <--> DB
-    Orchestrator <--> RepoIntel[Repository Intelligence Layer]
-    Orchestrator <--> Memory[Repository Memory System]
-    
-    RepoIntel <--> AST[AST Scanner]
-    RepoIntel <--> VectorDB[Vector Search Engine]
-    
-    CodingAgent <--> Workspace[Isolated Local Workspace]
-```
-
----
-
-## 🗄️ Database Schema Migration (Phase 11-22 Tables)
-
-We will define the following new tables in SQLAlchemy. These tables will be auto-generated on startup by `init_db`:
-
-### 1. `repository_memory`
-Stores long-term codebase memory, conventions, patterns, and past reviews.
-- `id` (String, PK)
-- `repository_id` (String, FK -> repositories.id)
-- `key` (String, Indexed)
-- `value` (Text)
-- `memory_type` (String) - e.g. "pattern", "convention", "preference", "past_review", "past_failure", "past_fix"
-- `created_at` (DateTime)
-- `updated_at` (DateTime)
-
-### 2. `repository_embeddings`
-Stores code block chunk embeddings for local semantic search.
-- `id` (String, PK)
-- `repository_id` (String, FK -> repositories.id)
-- `filepath` (String)
-- `symbol` (String, Nullable)
-- `content` (Text)
-- `embedding` (JSON) - Cosine similarity calculated in Python/numpy.
-- `created_at` (DateTime)
-
-### 3. `agent_states`
-Tracks LangGraph-style state data and current variables of active agents.
-- `id` (String, PK)
-- `run_id` (String, FK -> agent_runs.id)
-- `agent_name` (String)
-- `state_data` (JSON)
-- `status` (String) - "idle", "busy", "error", "done"
-- `updated_at` (DateTime)
-
-### 4. `agent_tasks`
-Detailed subtask tracking for multi-agent task execution timeline.
-- `id` (String, PK)
-- `run_id` (String, FK -> agent_runs.id)
-- `task_name` (String)
-- `description` (Text)
-- `assignee` (String) - Agent executing it
-- `status` (String) - "pending", "running", "completed", "failed"
-- `result` (JSON, Nullable)
-- `created_at` (DateTime)
-- `updated_at` (DateTime)
-
-### 5. `agent_plans`
-Stores detailed implementation strategies created by the Planning Agent.
-- `id` (String, PK)
-- `run_id` (String, FK -> agent_runs.id)
-- `title` (String)
-- `description` (Text)
-- `steps` (JSON) - Step list `[{"step": 1, "description": "...", "status": "pending"}]`
-- `status` (String) - "pending_approval", "approved", "rejected"
-- `feedback` (Text, Nullable)
-- `created_at` (DateTime)
-- `updated_at` (DateTime)
-
-### 6. `agent_reviews`
-Inspects git diffs, rating quality.
-- `id` (String, PK)
-- `pr_id` (String, FK -> pull_requests.id)
-- `reviewer_name` (String)
-- `report` (Text)
-- `score` (Integer) - Code quality rating (0-100)
-- `status` (String) - "passed", "failed_retry"
-- `created_at` (DateTime)
-
-### 7. `repair_attempts`
-Logs details of the self-healing validation loop.
-- `id` (String, PK)
-- `run_id` (String, FK -> agent_runs.id)
-- `attempt_number` (Integer)
-- `error_message` (Text)
-- `planned_fix` (Text)
-- `result_logs` (Text)
-- `status` (String) - "failed", "succeeded"
-- `created_at` (DateTime)
-
-### 8. `feedback_history`
-Saves human developer actions for learning loops.
-- `id` (String, PK)
-- `repository_id` (String, FK -> repositories.id)
-- `user_id` (String, FK -> users.id)
-- `action` (String) - "approve", "reject", "regenerate"
-- `feedback_text` (Text, Nullable)
-- `code_diff` (Text, Nullable)
-- `created_at` (DateTime)
-
-### 9. `learning_signals`
-Tracks maintainer preferences and standards derived from user reviews.
-- `id` (String, PK)
-- `repository_id` (String, FK -> repositories.id)
-- `signal_type` (String) - "convention", "preference", "review_pattern"
-- `description` (Text)
-- `strength` (Float) - weight/strength metric (0.0 to 1.0)
-- `created_at` (DateTime)
-
-### 10. `webhook_events`
-Logs received GitHub webhook deliveries.
-- `id` (String, PK)
-- `github_delivery_id` (String, Unique)
-- `event_type` (String)
-- `payload` (JSON)
-- `status` (String) - "received", "processed", "failed"
-- `error_message` (Text, Nullable)
-- `created_at` (DateTime)
-
-### 11. `code_search_index`
-Stores AST parsed symbols mapping.
-- `id` (String, PK)
-- `repository_id` (String, FK -> repositories.id)
-- `filepath` (String)
-- `symbol_name` (String, Indexed)
-- `symbol_type` (String) - e.g. "class", "function", "import"
-- `start_line` (Integer)
-- `end_line` (Integer)
-- `content` (Text)
-- `created_at` (DateTime)
-
-### 12. `implementation_iterations`
-Keeps track of coding iterations for diff reviews.
-- `id` (String, PK)
-- `run_id` (String, FK -> agent_runs.id)
-- `iteration_number` (Integer)
-- `explanation` (Text)
-- `code_diff` (Text)
-- `test_passed` (Boolean)
-- `test_logs` (Text, Nullable)
-- `created_at` (DateTime)
-
-### 13. `quality_metrics`
-Tracks scores for security, performance, style, and maintainability.
-- `id` (String, PK)
-- `run_id` (String, FK -> agent_runs.id)
-- `security_score` (Integer)
-- `performance_score` (Integer)
-- `maintainability_score` (Integer)
-- `style_score` (Integer)
-- `overall_score` (Integer)
-- `created_at` (DateTime)
-
----
-
-## 🚀 Phase Implementation Plan
-
-### Phase 11: Real Autonomous Coding Agent (Jules Integration)
-* **Design**: Add `JulesCodingAgent` and provider implementations to `agent_provider.py` (Jules, Aider, OpenHands, Claude Code, Gemini, Local). Set Jules as default.
-* **CLI Invocation**: Implement subprocess spawning to invoke tool CLI scripts where applicable, falling back to Gemini API parsing if CLI tools are not installed.
-* **Dashboard**: Create **Agent Execution Viewer** in the frontend, visualizing active agent tasks, files being read/patched, and current step logs.
-
-### Phase 12: Repository Intelligence Layer
-* **AST Codebase Scanner**: Write an AST parser (using Python's `ast` package and high-fidelity regex/tokenizers for TS/JS/Go/Java) to index symbols, functions, imports, and dependencies.
-* **Semantic Code Search**: Implement local embedding generation using Gemini API and store float vectors in `repository_embeddings`. Build a python/numpy cosine similarity query search.
-* **Visualization**: Add a **Repository Intelligence** page to visualize codebase structure, symbols list, and import relationships.
-
-### Phase 13: Multi-Agent Architecture
-* **State Engine**: Design a custom workflow manager in Python (`agent_orchestrator.py`) supporting state persistence (`agent_states`), tracing, and failure recovery.
-* **Agents**: Configure 9 specific agents (Issue, Assignment, Planning, Context, Coding, Validation, Review, PR, Learning).
-* **Dashboard**: Build **Agent Monitor** showing active states, task queues, and execution timelines.
-
-### Phase 14: Planning Agent
-* **Orchestrator Halt**: Modify the main workflow runner to generate an implementation plan and pause execution (setting run state to `awaiting_plan_approval`).
-* **Frontend Center**: Create a **Planning Center** page where the user can approve, reject, or request regeneration of the strategy plan before coding begins.
-
-### Phase 15: Intelligent Code Search Agent
-* **Context Gathering**: Connect codebase search index and semantic embeddings search into the Context Agent. Automatically retrieve target files, DTOs, and controllers based on issue keywords (e.g. "auth" -> AuthController).
-
-### Phase 16: Self-Healing Implementation Loop
-* **Repair Cycle**: Implement test failures analysis. If validation fails, parse compilation/test traceback logs, pass them back to the coding agent with a repair prompt, and repeat up to 3 times or until tests pass.
-* **Dashboard**: Build **Self-Healing Viewer** showing repair attempts, files updated, and compiler log improvements.
-
-### Phase 17: Active AI Review Loop
-* **Review Loop**: After code generation and test validation, trigger the Review Agent. Evaluate code using custom prompts for style, performance, and security. Keep refactoring code until quality score >= 80.
-
-### Phase 18: GitHub Webhook Architecture
-* **Webhook Endpoint**: Create `/api/v1/webhooks/github` POST endpoint. Add HMAC-SHA256 signature verification validating payloads.
-* **Celery Queue**: Queue webhook events (issue creation, comment, assignment) for asynchronous worker processing. Maintain polling fallback.
-
-### Phase 19: ELUSOC Intelligence Layer
-* **Tag Matching**: Detect issue eligibility using labels (`elusoc`, `good-first-issue`). Calculate contributor progress metrics.
-* **Dashboard**: Add **ELUSOC Dashboard** highlighting eligible bounty issues, matching scores, and completed PR tracking.
-
-### Phase 20: Repository Memory System
-* **Long-Term Memory**: Create `MemoryEngine` storing code patterns, preferences, and reviews in `repository_memory`. Feed memory context back to the planning and coding agents.
-
-### Phase 21: Human Feedback Learning System
-* **Feedback loop**: Parse user PR feedback (approvals/rejections). Generate `learning_signals` to adjust planning weights.
-
-### Phase 22: Advanced Draft PR Workspace
-* **Review Workspace**: Create a full-screen GitHub-style PR workspace. Serve unified/side-by-side diff viewers, file browsers, test logs, and actions (Request Re-Implementation, Edit PR Title/Desc, Edit Commit Message).
+1. **GitHub API Suffix Sensitivity (404 Error)**: When registering a repository, if the user enters a URL ending with `.git` (e.g., `https://github.com/owner/repo.git`), the backend parses the repository name as `repo.git`. The subsequent GitHub API query to `https://api.github.com/repos/owner/repo.git` returns `404 Not Found`. This causes registration to fail with: *"Repository not found on GitHub. Verify ownership and visibility settings."*
+2. **Missing Discovery Interface**: There is no UI or backend endpoint to fetch and list the user's actual GitHub repositories. The frontend dashboard only has a raw URL input text box, violating the Acceptance Criteria which require viewing, searching, filtering, and selecting from the user's GitHub repositories.
+3. **Missing Sync/Refresh Action**: No sync/refresh mechanism exists to update the repository's metadata (fork status, visibility, topics, description, default branch, etc.) and discover issues on-demand.
 
 ---
 
 ## User Review Required
 
 > [!IMPORTANT]
-> - **ChromaDB / tree-sitter installation fallback**: To guarantee 100% build compatibility on the system (Python 3.13 on Windows), we will code high-fidelity Python fallbacks for AST parsing and semantic vector storage (using numpy/sqlite cosine similarity), ensuring that even if native binary wheels for ChromaDB or tree-sitter are missing on this Python version, the app still functions correctly.
-> - **CLI Coding Agent execution**: Invoking real Jules/OpenHands CLI tools requires them to be installed on the host. We will invoke their respective command stubs, but implement full Gemini API logic as the underlying generator engine so you can run end-to-end tests even without having these CLIs preconfigured locally.
+> - **URL Cleaning**: The backend will automatically strip the `.git` suffix and any trailing slashes from entered URLs before calling the GitHub API and before saving the repository record.
+> - **Metadata Storage**: Since migrating the database schema is not desirable at this stage, all extra GitHub metadata (e.g., Description, Fork Status, Visibility, Owner, Language, Topics, Clone URL, GitHub URL, and Last Updated) will be structured and stored within the existing `meta_info` JSON column.
+> - **Mock Bypass Support**: For developer mode or mock users, both the discovery endpoint and sync endpoint will return high-fidelity mock data to ensure local test suites and sandbox demos run successfully.
+
+---
 
 ## Open Questions
 
-> [!WARNING]
-> 1. Do you have a configured **GitHub Webhook Secret** that we should set in the `.env` configuration, or should we define a default one (`supersecretwebhookkey`) for webhook testing?
-> 2. Should we prioritize **ChromaDB**/native database binaries first, or implement the SQLite-numpy vector search engine as the primary robust default for local execution?
+> [!NOTE]
+> We will implement the GitHub Repository list directly in the dashboard UI as a toggled tab ("Discover Repositories") next to the "My Registered Repositories" tab. If you prefer a different layout (e.g. side-by-side columns or a separate page), let us know, but a tabbed layout is typically clean and mobile-friendly.
+
+---
+
+## Proposed Changes
+
+### Backend Components
+
+#### [MODIFY] [repositories.py](file:///d:/PROJECTS/OpenSource%20Agent%20Project/backend/app/api/repositories.py)
+- Import `parse_github_url` utility or add inline parsing logic to strip `.git` and trailing slashes.
+- Retrieve full repository metadata (Name, Description, default branch, fork status, visibility, owner, language, topics, clone URL, html URL, updated_at) from the GitHub API response during registration and store it in `meta_info["github_metadata"]`.
+- `[NEW]` Add `GET /api/v1/repositories/github` route to fetch the authenticated user's repositories (forks and originals) from GitHub.
+- `[NEW]` Add `POST /api/v1/repositories/{repo_id}/sync` route to refresh repository metadata from the GitHub API and trigger issue discovery.
+- Ensure proper routing order so that `/github` does not conflict with `/{repo_id}`.
+
+---
+
+### Frontend Components
+
+#### [MODIFY] [Dashboard.tsx](file:///d:/PROJECTS/OpenSource%20Agent%20Project/frontend/src/pages/Dashboard.tsx)
+- Add a tab selection menu at the top: **My Registered Repositories** and **Discover GitHub Repositories**.
+- In **Discover GitHub Repositories**:
+  - Fetch available repositories from the backend `GET /repositories/github` endpoint.
+  - Render a search filter input (filter by repository name).
+  - Add quick filter buttons: **All**, **Forks**, **Original**.
+  - Show description, fork status (with icon), visibility status, and primary language for each repo.
+  - Render a **Register** button for each repository. Disable or show "Registered" if the repository is already in the local database.
+- In **My Registered Repositories**:
+  - Show full metadata details if available in `meta_info.github_metadata`.
+  - Add a **Sync Now** button next to each repository that triggers `POST /repositories/{repo_id}/sync` and displays a loading spinner.
+
+---
+
+## Verification Plan
+
+### Automated Tests
+We will write a suite of tests in:
+#### [NEW] [test_phase2.py](file:///d:/PROJECTS/OpenSource%20Agent%20Project/backend/tests/test_phase2.py)
+This test suite will verify:
+1. Registration cleaning logic (correctly parsing `https://github.com/owner/repo.git` and `https://github.com/owner/repo/` to `owner` and `repo`).
+2. Registering a repo fetches metadata and stores it in `meta_info`.
+3. The new `/repositories/github` endpoint returns the list of GitHub repositories (verified under mock mode).
+4. The `/repositories/{repo_id}/sync` endpoint updates metadata and triggers issue discovery.
+
+To run tests:
+```bash
+& "d:\PROJECTS\OpenSource Agent Project\venv\Scripts\python.exe" -m unittest backend/tests/test_phase2.py
+```
+
+### Manual Verification
+1. Run backend: `python -m uvicorn app.main:app --reload`
+2. Run frontend: `npm run dev`
+3. Log in via GitHub OAuth.
+4. On the Dashboard:
+   - Verify that all repositories (including forks) are loaded under the "Discover GitHub Repositories" tab.
+   - Type in the search box to filter by name.
+   - Toggle filters between "All", "Forks", and "Original".
+   - Select a fork and click "Register". Verify registration succeeds and transitions to "Cloning" state.
+   - Click "Sync Now" on a registered repository and verify that metadata and issues are refreshed.

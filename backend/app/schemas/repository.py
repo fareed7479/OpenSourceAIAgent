@@ -11,6 +11,8 @@ class RepositoryCreate(BaseModel):
         # standard github URL check: https://github.com/owner/name
         # clean the url first
         url_str = str(v).strip().rstrip("/")
+        if url_str.endswith(".git"):
+            url_str = url_str[:-4]
         if not url_str.startswith("https://github.com/"):
             raise ValueError("Only GitHub HTTPS repository URLs are supported (https://github.com/owner/repo)")
         parts = url_str.replace("https://github.com/", "").split("/")
