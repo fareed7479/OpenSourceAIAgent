@@ -87,6 +87,24 @@ async def approve_and_submit_pr(
         pr.approval_status = "approved"
         pr.url = f"https://github.com/{repo.owner}/{repo.name}/pull/{issue.number + 50}"
         pr.github_pr_id = 100000 + issue.number
+        
+        # Save human feedback & learning signal
+        from app.models.extensions import FeedbackHistory, LearningSignal
+        feedback = FeedbackHistory(
+            repository_id=repo.id,
+            user_id=current_user.id,
+            action="approve",
+            feedback_text="PR approved by human reviewer."
+        )
+        db.add(feedback)
+        signal = LearningSignal(
+            repository_id=repo.id,
+            signal_type="preference",
+            description="User approved PR style and implementations.",
+            strength=1.0
+        )
+        db.add(signal)
+        
         db.commit()
         return pr
 
@@ -138,6 +156,24 @@ async def approve_and_submit_pr(
         pr.approval_status = "approved"
         pr.url = pr_data.get("html_url")
         pr.github_pr_id = pr_data.get("id")
+        
+        # Save human feedback & learning signal
+        from app.models.extensions import FeedbackHistory, LearningSignal
+        feedback = FeedbackHistory(
+            repository_id=repo.id,
+            user_id=current_user.id,
+            action="approve",
+            feedback_text="PR approved by human reviewer."
+        )
+        db.add(feedback)
+        signal = LearningSignal(
+            repository_id=repo.id,
+            signal_type="preference",
+            description="User approved PR style and implementations.",
+            strength=1.0
+        )
+        db.add(signal)
+        
         db.commit()
         
         logger.info(f"PR submitted successfully. HTML URL: {pr.url}")
@@ -175,6 +211,23 @@ def reject_pr(
     if payload.feedback:
         # Append feedback to review status field
         pr.review_status = f"{pr.review_status or ''}\n\n### User Reject Feedback\n{payload.feedback}"
+        
+        # Save human feedback & learning signal
+        from app.models.extensions import FeedbackHistory, LearningSignal
+        feedback = FeedbackHistory(
+            repository_id=pr.agent_run.repository_id,
+            user_id=current_user.id,
+            action="reject",
+            feedback_text=payload.feedback
+        )
+        db.add(feedback)
+        signal = LearningSignal(
+            repository_id=pr.agent_run.repository_id,
+            signal_type="review_pattern",
+            description=f"User rejected PR with feedback: {payload.feedback}",
+            strength=2.0
+        )
+        db.add(signal)
         
     db.commit()
     return pr
