@@ -2,6 +2,7 @@ import React from "react";
 import { BrowserRouter as Router, Routes, Route, Link, Navigate, useLocation } from "react-router-dom";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { Login } from "./pages/Login";
+import { AuthCallback } from "./pages/AuthCallback";
 import { Dashboard } from "./pages/Dashboard";
 import { Issues } from "./pages/Issues";
 import { Assignments } from "./pages/Assignments";
@@ -157,6 +158,7 @@ export const App: React.FC = () => {
       <Router>
         <Routes>
           <Route path="/login" element={<LoginRedirectWrapper />} />
+          <Route path="/auth/callback" element={<AuthCallback />} />
           <Route
             path="*"
             element={
