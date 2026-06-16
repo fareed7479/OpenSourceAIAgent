@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import Optional, List, Any
 from pydantic import BaseModel
+from app.schemas.pr import PullRequestResponse
 
 class AgentLogResponse(BaseModel):
     id: str
@@ -27,6 +28,7 @@ class AgentRunResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     logs: List[AgentLogResponse] = []
+    pull_request: Optional[PullRequestResponse] = None
 
     class Config:
         from_attributes = True

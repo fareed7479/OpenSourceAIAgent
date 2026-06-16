@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
 import { ListTodo, Loader2, CheckCircle, RefreshCw, Clock, ArrowRight, ExternalLink } from "lucide-react";
 import { api } from "../api/client";
 
@@ -172,10 +173,13 @@ export const Assignments: React.FC = () => {
               
               {(assignment.status === "assigned" || assignment.status === "in_progress") && (
                 <div className="flex items-center">
-                  <span className="text-xs font-semibold text-indigo-400 bg-indigo-950/20 border border-indigo-500/20 py-2 px-4 rounded-xl flex items-center gap-1.5">
-                    Coding Loop Triggered
+                  <Link
+                    to={`/agent-monitor?issueId=${assignment.issue_id}`}
+                    className="text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 py-2.5 px-4 rounded-xl flex items-center gap-1.5 transition-all shadow-md shadow-indigo-600/10"
+                  >
+                    Monitor Agent Loop
                     <ArrowRight className="w-3.5 h-3.5 animate-pulse" />
-                  </span>
+                  </Link>
                 </div>
               )}
               

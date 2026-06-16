@@ -219,3 +219,55 @@ def regenerate_run_plan(
     thread.start()
     
     return {"message": "Regeneration triggered.", "status": "regenerating"}
+
+@router.get("/{run_id}/diff")
+def get_run_diff(
+    run_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Retrieve code diff (files modified, lines added/removed, patch preview) for a run."""
+    run = db.query(AgentRun).filter(AgentRun.id == run_id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found.")
+        
+    from app.services.workspace import WorkspaceManager
+    diff_content = ""
+    try:
+        diff_content = WorkspaceManager.get_diff(run.repository_id)
+    except Exception as e:
+        logger.error(f"Failed to get live git diff: {e}")
+        
+    # Fallback to stored implementation iteration diff if live diff is clean (e.g. committed)
+    if not diff_content:
+        from app.models.extensions import ImplementationIteration
+        latest_it = db.query(ImplementationIteration).filter(
+            ImplementationIteration.run_id == run_id
+        ).order_by(ImplementationIteration.iteration_number.desc()).first()
+        if latest_it:
+            diff_content = latest_it.code_diff
+            
+    files_modified = []
+    lines_added = 0
+    lines_removed = 0
+    
+    if diff_content:
+        for line in diff_content.splitlines():
+            if line.startswith("diff --git"):
+                parts = line.split(" ")
+                if len(parts) >= 4:
+                    filename = parts[3].replace("b/", "")
+                    if filename not in files_modified:
+                        files_modified.append(filename)
+            elif line.startswith("+") and not line.startswith("+++"):
+                lines_added += 1
+            elif line.startswith("-") and not line.startswith("---"):
+                lines_removed += 1
+                
+    return {
+        "run_id": run_id,
+        "diff": diff_content,
+        "files_modified": files_modified,
+        "lines_added": lines_added,
+        "lines_removed": lines_removed
+    }

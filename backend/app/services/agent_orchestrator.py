@@ -11,6 +11,7 @@ from app.models.run import AgentRun
 from app.models.issue import Issue
 from app.models.repository import Repository
 from app.models.extensions import AgentState, AgentTask, AgentPlan, AgentReview, RepairAttempt, ImplementationIteration, QualityMetric, RepositoryMemory
+from app.models.logs import AgentLog
 from app.services.workspace import WorkspaceManager
 from app.services.agent_provider import get_coding_agent
 from app.services.intelligence import query_semantic_code_search
@@ -55,26 +56,63 @@ class AgentNode:
     def __init__(self, name: str):
         self.name = name
 
+    def _log_stage(self, db: Session, run_id: str, message: str, data: Any = None) -> None:
+        """Helper to write logs to the AgentLog table in the DB."""
+        from app.models.logs import AgentLog
+        stage_map = {
+            "issue_agent": "workspace",
+            "assignment_agent": "workspace",
+            "planning_agent": "workspace",
+            "context_agent": "context",
+            "coding_agent": "coding",
+            "validation_agent": "validation",
+            "self_healing_loop": "validation",
+            "review_agent": "review",
+            "pr_agent": "pr",
+            "learning_agent": "pr"
+        }
+        stage = stage_map.get(self.name, "workspace")
+        logger.info(f"[{stage.upper()}] {message}")
+        log_entry = AgentLog(
+            agent_run_id=run_id,
+            stage=stage,
+            message=message,
+            data=data
+        )
+        db.add(log_entry)
+        db.commit()
+
     def execute(self, state: OrchestrationState, db: Session) -> Tuple[OrchestrationState, str]:
         """
         Runs agent logic.
         Returns: Tuple[UpdatedState, NextNodeName]
         """
-        # Create a task record to trace execution timeline in frontend
-        task = AgentTask(
-            run_id=state.run_id,
-            task_name=self.name.replace("_", " ").title(),
-            description=f"Running agent node task logic: {self.name}",
-            assignee=self.name,
-            status="running"
-        )
-        db.add(task)
+        # Create or update a task record to trace execution timeline in frontend
+        task = db.query(AgentTask).filter(
+            AgentTask.run_id == state.run_id,
+            AgentTask.assignee == self.name
+        ).first()
+        
+        if not task:
+            task = AgentTask(
+                run_id=state.run_id,
+                task_name=self.name.replace("_", " ").title(),
+                description=f"Running agent node task logic: {self.name}",
+                assignee=self.name,
+                status="running"
+            )
+            db.add(task)
+        else:
+            task.status = "running"
+            task.description = f"Rerunning agent node task logic: {self.name}"
+            
         db.commit()
         db.refresh(task)
         
         # Log transition
         logger.info(f"[{state.run_id}] Executing Agent Node: {self.name}")
         state.logs.append(f"Starting {self.name} at {datetime.datetime.now().isoformat()}")
+        self._log_stage(db, state.run_id, f"Agent node {self.name.replace('_', ' ').title()} started executing.")
         
         try:
             updated_state, next_node = self._run_logic(state, db)
@@ -85,12 +123,19 @@ class AgentNode:
                 "review_score": updated_state.review_score
             }
             db.commit()
+            self._log_stage(db, state.run_id, f"Agent node {self.name.replace('_', ' ').title()} completed. Next node: {next_node}")
             return updated_state, next_node
         except Exception as e:
+            import traceback
+            tb_str = traceback.format_exc()
             logger.error(f"[{state.run_id}] Node {self.name} failed with error: {e}", exc_info=True)
             task.status = "failed"
-            task.result = {"error": str(e)}
+            task.result = {"error": str(e), "traceback": tb_str}
             db.commit()
+            self._log_stage(db, state.run_id, f"Agent node {self.name.replace('_', ' ').title()} failed: {e}", {
+                "error": str(e),
+                "traceback": tb_str
+            })
             raise e
 
     def _run_logic(self, state: OrchestrationState, db: Session) -> Tuple[OrchestrationState, str]:
@@ -118,6 +163,13 @@ class IssueAgent(AgentNode):
         issue.score = evals["score"]
         issue.ranking_reason = evals["ranking_reason"]
         
+        db.commit()
+        
+        self._log_stage(db, state.run_id, f"Issue #{issue.number} classified. Difficulty: {issue.difficulty}, suitability score: {issue.score}/100.", {
+            "difficulty": issue.difficulty,
+            "score": issue.score,
+            "ranking_reason": issue.ranking_reason
+        })
         logger.info(f"Issue #{issue.number} classified. Suitability score: {issue.score}")
         return state, "assignment_agent"
 
@@ -136,6 +188,10 @@ class AssignmentAgent(AgentNode):
         if issue.assignment_status != "assigned_to_user":
             logger.warning(f"Issue #{issue.number} is not assigned to user yet. Status: {issue.assignment_status}")
             
+        self._log_stage(db, state.run_id, f"Assignment verified for Issue #{issue.number}. Status is '{issue.assignment_status}'.", {
+            "assignment_status": issue.assignment_status,
+            "assignee": issue.assignee_username
+        })
         return state, "planning_agent"
 
 
@@ -226,6 +282,11 @@ Return output strictly as a JSON object:
         run.status = "awaiting_plan_approval"
         db.commit()
         
+        self._log_stage(db, state.run_id, f"Implementation strategy plan generated: '{plan.title}'. Awaiting plan approval from human in dashboard.", {
+            "title": plan.title,
+            "description": plan.description,
+            "steps": plan.steps
+        })
         logger.info(f"Implementation strategy plan generated: {plan.id}. Halting workflow for human approval.")
         return state, "context_agent"
 
@@ -241,6 +302,7 @@ class ContextAgent(AgentNode):
         repo = run.repository
         
         logger.info(f"Running semantic code search query: '{issue.title}'...")
+        self._log_stage(db, state.run_id, f"Initiating semantic code search for query: '{issue.title}'")
         # Search the vector database index (SQLite default)
         search_results = query_semantic_code_search(repo.id, issue.title + " " + (issue.description or ""), limit=4)
         
@@ -260,6 +322,7 @@ class ContextAgent(AgentNode):
                     
         # If no semantic matches, search standard paths (main.py, security.py)
         if not state.relevant_files:
+            self._log_stage(db, state.run_id, "No semantic search matches. Falling back to default files (main.py, auth.py, security.py).")
             # Fallback to main.py
             for root, dirs, files in os.walk(repo_path):
                 for file in files:
@@ -269,6 +332,9 @@ class ContextAgent(AgentNode):
                         with open(os.path.join(root, file), "r", encoding="utf-8") as f:
                             state.file_contents[rel] = f.read(40000)
                             
+        self._log_stage(db, state.run_id, f"Context retrieval finished. Gathered context from {len(state.relevant_files)} files.", {
+            "relevant_files": state.relevant_files
+        })
         return state, "coding_agent"
 
 
@@ -297,6 +363,7 @@ class CodingAgent(AgentNode):
             for file in files:
                 file_tree.append(os.path.relpath(os.path.join(root, file), repo_path))
 
+        self._log_stage(db, state.run_id, f"Invoking coding provider agent '{provider}' to generate implementation changes.")
         # Generate fixes
         result = agent.generate_fix(
             issue_title=issue.title,
@@ -310,6 +377,7 @@ class CodingAgent(AgentNode):
         state.proposed_changes = result.get("changes", [])
         
         # Apply changes to local files
+        applied_files = []
         for change in state.proposed_changes:
             rel_path = change.get("filepath")
             content = change.get("content")
@@ -320,7 +388,17 @@ class CodingAgent(AgentNode):
                 os.makedirs(os.path.dirname(abs_path), exist_ok=True)
                 with open(abs_path, "w", encoding="utf-8") as f:
                     f.write(content)
-                    
+                applied_files.append(rel_path)
+                
+        # Generate and store diff in state
+        diff_str = WorkspaceManager.get_diff(repo.id)
+        state.diff = diff_str
+        
+        self._log_stage(db, state.run_id, f"Coding agent successfully applied changes to {len(applied_files)} files.", {
+            "applied_files": applied_files,
+            "explanation": result.get("explanation", ""),
+            "diff": diff_str
+        })
         return state, "validation_agent"
 
 
@@ -333,6 +411,7 @@ class ValidationAgent(AgentNode):
         run = db.query(AgentRun).filter(AgentRun.id == state.run_id).first()
         repo = run.repository
         
+        self._log_stage(db, state.run_id, f"Running validation commands for build system '{repo.build_system or 'unknown'}'. Test command: '{repo.test_command or ''}', Lint command: '{repo.lint_command or ''}'")
         from app.services.agent_runner import _run_validation_commands
         passed, val_logs = _run_validation_commands(
             repo_id=repo.id,
@@ -343,6 +422,8 @@ class ValidationAgent(AgentNode):
         
         state.validation_passed = passed
         state.validation_logs = val_logs
+        
+        self._log_stage(db, state.run_id, f"Validation checks complete. Status: {'PASSED' if passed else 'FAILED'}", val_logs)
         
         # If tests failed, transition to SELF-HEALING implementation loop!
         if not passed:
@@ -363,10 +444,14 @@ class SelfHealingLoop(AgentNode):
         issue = run.issue
         
         state.retry_count += 1
-        
         # Log attempt details
         error_msg = state.validation_logs.get("test_stderr", "") or state.validation_logs.get("test_stdout", "")
         planned_fix = f"Repair build errors in previous attempt #{state.retry_count}."
+        
+        self._log_stage(db, state.run_id, f"Self-healing loop: starting QA repair iteration #{state.retry_count} to fix test/build crash.", {
+            "attempt_number": state.retry_count,
+            "error": error_msg[:1000]
+        })
         
         attempt = RepairAttempt(
             run_id=state.run_id,
@@ -382,6 +467,7 @@ class SelfHealingLoop(AgentNode):
         # Check retry limit threshold
         if state.retry_count > state.max_retries:
             logger.error(f"[{state.run_id}] Self-healing failed. Reached max retry limit of {state.max_retries}.")
+            self._log_stage(db, state.run_id, f"Self-healing aborted. Reached max retry threshold limit of {state.max_retries}.")
             return state, "review_agent" # proceed to review even with failure, or abort
 
         # Query LLM to resolve the test failures
@@ -441,6 +527,14 @@ Return output strictly as a JSON object:
             )
             db.add(iteration)
             db.commit()
+            
+            # Generate and store diff in state
+            state.diff = iteration.code_diff
+            
+            self._log_stage(db, state.run_id, f"Self-healing loop applied repair changes for iteration #{state.retry_count}.", {
+                "explanation": repaired_result.get("explanation", ""),
+                "diff": iteration.code_diff
+            })
 
         # Re-run validation commands to verify healing outcome
         from app.services.agent_runner import _run_validation_commands
@@ -458,9 +552,11 @@ Return output strictly as a JSON object:
             attempt.status = "succeeded"
             db.commit()
             logger.info(f"[{state.run_id}] Self-healing succeeded on attempt #{state.retry_count}!")
+            self._log_stage(db, state.run_id, f"Self-healing succeeded on attempt #{state.retry_count}! Validation passed clean.")
             return state, "review_agent"
             
         # Recursive retry loop
+        self._log_stage(db, state.run_id, f"Self-healing attempt #{state.retry_count} failed to repair test crash. Retrying...")
         return state, "self_healing_loop"
 
 
@@ -532,10 +628,15 @@ Return JSON:
         db.add(metric)
         db.commit()
 
+        self._log_stage(db, state.run_id, f"Code review completed. Score: {state.review_score}/100. Breakdown: Security: {metric.security_score}, Performance: {metric.performance_score}, Style: {metric.style_score}", {
+            "report": state.review_report
+        })
+
         # If review quality score is low (< 80) and we haven't hit max retries, loop back to coding agent with review comments!
         if state.review_score < 80 and state.retry_count < state.max_retries:
             state.retry_count += 1
             logger.warning(f"[{state.run_id}] Review score {state.review_score} < 80. Triggering review-driven refactoring pass.")
+            self._log_stage(db, state.run_id, f"Review score {state.review_score} is below threshold. Looping back to coding agent for refinement pass.")
             
             # Feed review comments back to the file context
             state.file_contents["REVIEW_COMMENTS.md"] = state.review_report
@@ -551,6 +652,7 @@ class PRAgent(AgentNode):
 
     def _run_logic(self, state: OrchestrationState, db: Session) -> Tuple[OrchestrationState, str]:
         run = db.query(AgentRun).filter(AgentRun.id == state.run_id).first()
+        self._log_stage(db, state.run_id, "Creating final Pull Request draft workspace payload.")
         
         # Trigger standard PR description formatting
         from app.services.agent_runner import _generate_pr_description
@@ -593,6 +695,7 @@ class PRAgent(AgentNode):
             
         db.commit()
         
+        self._log_stage(db, state.run_id, f"Draft pull request saved. Title: '{pr_title}'. Branch: {run.branch_name}. Committing local modifications.")
         # Run commit and stage local files
         commit_success = WorkspaceManager.commit_changes(run.repository_id, pr_title)
         
@@ -608,6 +711,7 @@ class LearningAgent(AgentNode):
         run = db.query(AgentRun).filter(AgentRun.id == state.run_id).first()
         repo = run.repository
         
+        self._log_stage(db, state.run_id, "Consolidating learning signals and repository memory fixes.")
         if state.validation_passed:
             memory = RepositoryMemory(
                 repository_id=repo.id,
