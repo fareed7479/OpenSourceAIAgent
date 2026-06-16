@@ -193,13 +193,16 @@ def _chunk_code(filepath: str, content: str, symbols: List[Tuple[str, str, int, 
     return chunks
 
 
+_gemini_api_working = True
+
 def get_text_embedding(text: str) -> List[float]:
     """
     Generates a 768-dimension vector embedding using Google Gemini Embeddings API.
-    Returns a hash-derived fallback vector if the API key is not configured.
+    Returns a hash-derived fallback vector if the API key is not configured or fails.
     """
+    global _gemini_api_working
     api_key = settings.GEMINI_API_KEY
-    if api_key:
+    if api_key and _gemini_api_working:
         try:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key={api_key}"
             payload = {
@@ -207,12 +210,16 @@ def get_text_embedding(text: str) -> List[float]:
                     "parts": [{"text": text[:2000]}]  # Cap size to avoid bloating
                 }
             }
-            res = httpx.post(url, json=payload, timeout=10.0)
+            res = httpx.post(url, json=payload, timeout=5.0)
             if res.status_code == 200:
                 data = res.json()
                 return data["embedding"]["values"]
+            else:
+                logger.warning(f"Gemini API returned status {res.status_code} for embeddings. Disabling remote API for this session.")
+                _gemini_api_working = False
         except Exception as e:
-            logger.warning(f"Failed to fetch real vector embedding from Gemini: {e}")
+            logger.warning(f"Failed to fetch real vector embedding from Gemini: {e}. Disabling remote API.")
+            _gemini_api_working = False
 
     # Fallback deterministic vector hash (length 768)
     vector = []
