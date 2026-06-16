@@ -95,6 +95,8 @@ def main():
         sys.stderr.write("Error: GEMINI_API_KEY environment variable not configured.\n")
         sys.exit(1)
         
+    is_mock = api_key.startswith("mock-") or "dummy" in api_key.lower()
+        
     # Read issue
     if not os.path.exists(args.issue):
         sys.stderr.write(f"Error: Issue file not found: {args.issue}\n")
@@ -120,7 +122,68 @@ def main():
                     relevant_files[rel_path] = f.read()
                     
     sys.stderr.write("Jules CLI: Generating fix using Gemini reasoning...\n")
-    fix = get_gemini_fix(api_key, title, desc, relevant_files)
+    if is_mock:
+        # Determine which project we are in and what mock fix to return
+        # 1. Bookstore: services/discount_service.py
+        discount_path = "services/discount_service.py"
+        if discount_path in relevant_files:
+            content = relevant_files[discount_path]
+            # Check if it has incorrect fix already (to trigger healing)
+            if "return 0.0" in content:
+                sys.stderr.write("Mock Mode: Generating correct repaired fix for Bookstore (ValueError)\n")
+                fix = {
+                    "explanation": "Self-healing repair: Caught ZeroDivisionError or incorrect check and raised ValueError.",
+                    "changes": [
+                        {
+                            "filepath": "services/discount_service.py",
+                            "content": "class DiscountService:\n    def calculate_discount(self, original_price: float, discount_percentage: float) -> float:\n        if discount_percentage > 100:\n            raise ValueError(\"Discount cannot exceed 100%\")\n        if discount_percentage < 0:\n            raise ValueError(\"Discount cannot be negative\")\n        return original_price * (discount_percentage / 100.0)\n"
+                        }
+                    ]
+                }
+            else:
+                sys.stderr.write("Mock Mode: Generating incorrect initial fix for Bookstore (returns 0)\n")
+                fix = {
+                    "explanation": "Modified calculate_discount function to return 0 when discount_percentage is negative.",
+                    "changes": [
+                        {
+                            "filepath": "services/discount_service.py",
+                            "content": "class DiscountService:\n    def calculate_discount(self, original_price: float, discount_percentage: float) -> float:\n        if discount_percentage > 100:\n            raise ValueError(\"Discount cannot exceed 100%\")\n        if discount_percentage < 0:\n            return 0.0\n        return original_price * (discount_percentage / 100.0)\n"
+                        }
+                    ]
+                }
+        # 2. Calculator: calculator.py
+        elif "calculator.py" in relevant_files:
+            content = relevant_files["calculator.py"]
+            if "return 0" in content:
+                sys.stderr.write("Mock Mode: Generating correct repaired fix for Calculator (ValueError)\n")
+                fix = {
+                    "explanation": "Self-healing repair: Caught ZeroDivisionError and raised ValueError.",
+                    "changes": [
+                        {
+                            "filepath": "calculator.py",
+                            "content": "def divide(a, b):\n    if b == 0:\n        raise ValueError('Cannot divide by zero')\n    return a / b\n"
+                        }
+                    ]
+                }
+            else:
+                sys.stderr.write("Mock Mode: Generating incorrect initial fix for Calculator (returns 0)\n")
+                fix = {
+                    "explanation": "Modified divide function to return 0 when divisor b is 0.",
+                    "changes": [
+                        {
+                            "filepath": "calculator.py",
+                            "content": "def divide(a, b):\n    if b == 0:\n        return 0\n    return a / b\n"
+                        }
+                    ]
+                }
+        else:
+            sys.stderr.write("Mock Mode: Project unrecognized, returning default mock fix.\n")
+            fix = {
+                "explanation": "Default mock fix.",
+                "changes": []
+            }
+    else:
+        fix = get_gemini_fix(api_key, title, desc, relevant_files)
     
     # Apply changes
     if args.apply:
