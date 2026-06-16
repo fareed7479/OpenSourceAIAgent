@@ -51,9 +51,22 @@ def request_issue_assignment(issue_id: str, user_id: str, db: Session = None) ->
         decrypted_token = decrypt_token(repo.user.access_token)
         is_mock = repo.user.github_id.startswith("mock-") or decrypted_token == "mock-github-access-token"
 
-        # 1. Determine target repository
-        target_owner = issue.source_owner or repo.owner
-        target_repo = issue.source_repo or repo.name
+        # 1. Determine target repository with dynamic runtime fallback parsing from issue.url
+        target_owner = issue.source_owner
+        target_repo = issue.source_repo
+        
+        if not target_owner or not target_repo:
+            if issue.url:
+                try:
+                    parts = issue.url.replace("https://github.com/", "").split("/")
+                    if len(parts) >= 2:
+                        target_owner = parts[0]
+                        target_repo = parts[1]
+                except Exception as parse_err:
+                    logger.warning(f"Failed to parse issue URL at runtime: {parse_err}")
+                    
+        target_owner = target_owner or repo.owner
+        target_repo = target_repo or repo.name
 
         # 2. Print logging validation before comment posting
         token_context = f"Token present (len={len(decrypted_token)})" if decrypted_token else "No token context"
@@ -177,9 +190,23 @@ def monitor_assignments_task() -> None:
                 _trigger_agent_run(db, repo.id, issue.id, user.id)
                 continue
 
-            # 2. Production GitHub API status polling
-            target_owner = issue.source_owner or repo.owner
-            target_repo = issue.source_repo or repo.name
+            # 2. Production GitHub API status polling with dynamic runtime fallback
+            target_owner = issue.source_owner
+            target_repo = issue.source_repo
+            
+            if not target_owner or not target_repo:
+                if issue.url:
+                    try:
+                        parts = issue.url.replace("https://github.com/", "").split("/")
+                        if len(parts) >= 2:
+                            target_owner = parts[0]
+                            target_repo = parts[1]
+                    except Exception as parse_err:
+                        logger.warning(f"Failed to parse issue URL at runtime for polling: {parse_err}")
+                        
+            target_owner = target_owner or repo.owner
+            target_repo = target_repo or repo.name
+            
             url = f"https://api.github.com/repos/{target_owner}/{target_repo}/issues/{issue.number}"
             headers = {
                 "Authorization": f"token {decrypted_token}",
