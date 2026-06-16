@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.issue import Issue
 from app.models.repository import Repository
-from app.models.extensions import CodeSearchIndex, RepositoryMemory, AgentTask, LearningSignal, FeedbackHistory
+from app.models.extensions import CodeSearchIndex, RepositoryMemory, AgentTask, LearningSignal, FeedbackHistory, ImplementationIteration, QualityMetric, RepairAttempt
 from app.api.deps import get_current_user
 from app.models.user import User
 from app.services.intelligence import query_semantic_code_search

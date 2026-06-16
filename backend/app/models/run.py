@@ -13,6 +13,9 @@ class AgentRun(Base):
     branch_name = Column(String, nullable=False)
     provider = Column(String, nullable=False)  # gemini, claude, etc.
     status = Column(String, default="pending")  # pending, running, validating, reviewing, completed, failed
+    actual_provider = Column(String, nullable=True)
+    fallback_provider = Column(String, nullable=True)
+    fallback_reason = Column(String, nullable=True)
     
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())

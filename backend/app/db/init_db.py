@@ -65,6 +65,25 @@ def run_migrations() -> None:
         else:
             logger.info("Assignments table does not exist yet. Skipping assignments migrations.")
 
+        # 3. Migrate agent_runs table if it exists
+        if inspector.has_table("agent_runs"):
+            columns = [col["name"] for col in inspector.get_columns("agent_runs")]
+            with engine.connect() as conn:
+                if "actual_provider" not in columns:
+                    logger.info("Migration: Adding column actual_provider to agent_runs table...")
+                    conn.execute(text("ALTER TABLE agent_runs ADD COLUMN actual_provider VARCHAR;"))
+                    conn.commit()
+                if "fallback_provider" not in columns:
+                    logger.info("Migration: Adding column fallback_provider to agent_runs table...")
+                    conn.execute(text("ALTER TABLE agent_runs ADD COLUMN fallback_provider VARCHAR;"))
+                    conn.commit()
+                if "fallback_reason" not in columns:
+                    logger.info("Migration: Adding column fallback_reason to agent_runs table...")
+                    conn.execute(text("ALTER TABLE agent_runs ADD COLUMN fallback_reason VARCHAR;"))
+                    conn.commit()
+        else:
+            logger.info("Agent runs table does not exist yet. Skipping agent_runs migrations.")
+
         logger.info("Database migrations check complete.")
     except Exception as e:
         logger.error(f"Error running database migrations: {e}")

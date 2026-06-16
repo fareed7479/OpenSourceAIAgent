@@ -91,23 +91,35 @@ class JulesCodingAgent(BaseCodingAgent):
                 if os.path.exists(issue_path):
                     os.remove(issue_path)
 
+                fallback_reason = None
                 if jules_run.returncode == 0:
                     try:
                         # Attempt to parse json outcome from Jules CLI
-                        return json.loads(jules_run.stdout)
+                        res = json.loads(jules_run.stdout)
+                        res["provider_metadata"] = {
+                            "requested_provider": "jules",
+                            "actual_provider": "jules",
+                            "fallback_provider": None,
+                            "fallback_reason": None
+                        }
+                        return res
                     except json.JSONDecodeError:
                         logger.warning("Jules executed successfully but stdout was not valid JSON. Querying git changes.")
+                        fallback_reason = "Jules executed successfully but stdout was not valid JSON."
                 else:
                     logger.error(f"Jules CLI execution failed: {jules_run.stderr}")
+                    fallback_reason = f"Jules CLI execution failed: {jules_run.stderr}"
         except FileNotFoundError:
             logger.warning("Jules CLI binary ('jules') not found on system PATH.")
+            fallback_reason = "Jules CLI binary ('jules') not found on system PATH."
         except Exception as e:
             logger.error(f"Error running Jules CLI: {e}")
+            fallback_reason = f"Error running Jules CLI: {e}"
 
         # 2. Fallback to Gemini LLM provider engine if CLI fails or is missing
         logger.info("Jules falling back to default LLM engine backend...")
         fallback_agent = GeminiCodingAgent(api_key=self.api_key or settings.GEMINI_API_KEY)
-        return fallback_agent.generate_fix(
+        res = fallback_agent.generate_fix(
             issue_title=issue_title,
             issue_desc=issue_desc,
             file_tree=file_tree,
@@ -115,6 +127,13 @@ class JulesCodingAgent(BaseCodingAgent):
             contribution_rules=contribution_rules,
             workspace_path=workspace_path
         )
+        res["provider_metadata"] = {
+            "requested_provider": "jules",
+            "actual_provider": "gemini",
+            "fallback_provider": "gemini",
+            "fallback_reason": fallback_reason or "Jules CLI execution failed."
+        }
+        return res
 
 
 class OpenHandsCodingAgent(BaseCodingAgent):
@@ -359,7 +378,14 @@ Do NOT wrap the JSON in markdown code blocks like ```json ... ```. Just return t
                     lines = lines[:-1]
                 response_text = "\n".join(lines).strip()
                 
-            return json.loads(response_text)
+            res = json.loads(response_text)
+            res["provider_metadata"] = {
+                "requested_provider": "gemini",
+                "actual_provider": "gemini",
+                "fallback_provider": None,
+                "fallback_reason": None
+            }
+            return res
         except Exception as e:
             logger.error(f"Gemini agent failed: {e}")
             raise e

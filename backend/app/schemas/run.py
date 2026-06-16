@@ -25,6 +25,9 @@ class AgentRunResponse(BaseModel):
     branch_name: str
     provider: str
     status: str
+    actual_provider: Optional[str] = None
+    fallback_provider: Optional[str] = None
+    fallback_reason: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     logs: List[AgentLogResponse] = []
