@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { 
   Search, Loader2, BookOpen, UserPlus, RefreshCw, Sparkles, 
-  CheckCircle2, ChevronRight, X, Calendar, MessageSquare, User, Tag, AlertCircle
+  CheckCircle2, ChevronRight, X, Calendar, MessageSquare, User, Tag
 } from "lucide-react";
 import { api } from "../api/client";
 
@@ -448,7 +448,7 @@ export const Issues: React.FC = () => {
                   {selectedIssue.ranking_reason.split(";").map((reason, idx) => (
                     <li key={idx} className="flex items-start gap-2">
                       <span className="text-indigo-400 font-extrabold flex-shrink-0">•</span>
-                      <span>{reason.strip ? reason.strip() : reason.trim()}</span>
+                      <span>{reason.trim()}</span>
                     </li>
                   ))}
                 </ul>

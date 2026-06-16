@@ -44,24 +44,63 @@ def request_issue_assignment(issue_id: str, user_id: str, db: Session = None) ->
             Assignment.user_id == user_id
         ).first()
         
-        if existing and existing.status in ["requested", "active"]:
+        if existing and existing.status in ["requested", "comment_posted", "assigned", "in_progress"]:
             logger.info(f"Assignment already {existing.status} for issue {issue_id}.")
             return existing
 
         decrypted_token = decrypt_token(repo.user.access_token)
         is_mock = repo.user.github_id.startswith("mock-") or decrypted_token == "mock-github-access-token"
 
+        # 1. Determine target repository
+        target_owner = issue.source_owner or repo.owner
+        target_repo = issue.source_repo or repo.name
+
+        # 2. Print logging validation before comment posting
+        token_context = f"Token present (len={len(decrypted_token)})" if decrypted_token else "No token context"
+        logger.info("========================================")
+        logger.info("PRE-COMMENT POSTING VALIDATION:")
+        logger.info(f"  Target Repository Owner: {target_owner}")
+        logger.info(f"  Target Repository Name: {target_repo}")
+        logger.info(f"  Issue Number: {issue.number}")
+        logger.info(f"  Issue URL: {issue.url}")
+        logger.info(f"  GitHub Token Context: {token_context}")
+        logger.info("========================================")
+
+        # 3. Retrieve template (configurable with Settings model fallback)
+        from app.models.settings import Setting
+        template_setting = db.query(Setting).filter(
+            Setting.user_id == user_id,
+            Setting.key == "assignment_comment_template"
+        ).first()
+
+        template = template_setting.value if template_setting else None
+        if not template:
+            template = (
+                "Hi Maintainers,\n\n"
+                "I would like to work on this issue as part of the ELUSOC Open Source Program.\n\n"
+                "Could you please assign this issue to me?\n\n"
+                "GitHub Username: {username}\n\n"
+                "Thank you."
+            )
+
+        # Retrieve user record for username formatting
+        from app.models.user import User as UserModel
+        user_record = db.query(UserModel).filter(UserModel.id == user_id).first()
+        username_val = user_record.username if user_record else ""
+        comment_body = template.replace("{username}", username_val).replace("{number}", str(issue.number))
+
         comment_id = None
+        comment_url = None
         
         if not is_mock:
             # Post comment to GitHub issue comments endpoint
-            url = f"https://api.github.com/repos/{repo.owner}/{repo.name}/issues/{issue.number}/comments"
+            url = f"https://api.github.com/repos/{target_owner}/{target_repo}/issues/{issue.number}/comments"
             headers = {
                 "Authorization": f"token {decrypted_token}",
                 "Accept": "application/vnd.github.v3+json",
                 "User-Agent": "OpenSource-AI-Contribution-Agent"
             }
-            payload = {"body": ASSIGNMENT_COMMENT_TEMPLATE}
+            payload = {"body": comment_body}
             
             logger.info(f"Posting assignment request comment to GitHub: {url}")
             response = httpx.post(url, headers=headers, json=payload, timeout=10.0)
@@ -69,33 +108,33 @@ def request_issue_assignment(issue_id: str, user_id: str, db: Session = None) ->
             if response.status_code == 201:
                 comment_data = response.json()
                 comment_id = comment_data.get("id")
-                logger.info(f"Comment posted successfully. Comment ID: {comment_id}")
+                comment_url = comment_data.get("html_url")
+                logger.info(f"Comment posted successfully. Comment ID: {comment_id}, URL: {comment_url}")
             else:
                 logger.error(f"Failed to post assignment comment to GitHub: {response.status_code} - {response.text}")
                 raise Exception("Failed to post comment to GitHub. Please check repository access settings.")
         else:
             logger.info(f"[Mock Mode] Simulation: Posting comment requesting assignment for issue #{issue.number}")
             comment_id = 999111  # mock comment ID
+            comment_url = f"https://github.com/{target_owner}/{target_repo}/issues/{issue.number}#issuecomment-{comment_id}"
             
         # Create DB Assignment record
         assignment = Assignment(
             user_id=user_id,
             issue_id=issue_id,
-            status="requested",
-            request_comment_id=comment_id
+            status="comment_posted", # Transition state to comment_posted
+            request_comment_id=comment_id,
+            comment_url=comment_url,
+            issue_url=issue.url,
+            repository_url=f"https://github.com/{target_owner}/{target_repo}"
         )
         db.add(assignment)
         
-        # Update Issue status to requested
-        issue.assignment_status = "requested"
+        # Update Issue status to comment_posted
+        issue.assignment_status = "comment_posted"
         db.commit()
         db.refresh(assignment)
         
-        # If mock mode, trigger a quick background helper to auto-assign it after a short delay
-        if is_mock:
-            from fastapi import BackgroundTasks
-            # We will handle mock auto-assignment inline in monitor task
-            
         return assignment
     except Exception as e:
         logger.error(f"Error requesting issue assignment: {e}")
@@ -113,9 +152,9 @@ def monitor_assignments_task() -> None:
     """
     db: Session = SessionLocal()
     try:
-        # Get all requested or monitoring assignments
+        # Get all requested, comment_posted, or monitoring assignments
         active_requests = db.query(Assignment).filter(
-            Assignment.status.in_(["requested", "monitoring"])
+            Assignment.status.in_(["requested", "comment_posted", "monitoring"])
         ).all()
         
         for assignment in active_requests:
@@ -129,18 +168,19 @@ def monitor_assignments_task() -> None:
             # 1. Handle Mock Auto-Assignment Bypass
             if is_mock:
                 logger.info(f"[Mock Mode] Simulating maintainer review. Auto-assigning issue #{issue.number} to user {user.username}")
-                assignment.status = "active"
-                issue.assignment_status = "assigned_to_user"
+                assignment.status = "assigned"
+                issue.assignment_status = "assigned"
                 issue.assignee_username = user.username
                 db.commit()
                 
-                # Trigger Workspace Manager / coding flow (Phase 4 / 5)
-                # To prevent circular imports we do it inline
+                # Trigger Workspace Manager / coding flow
                 _trigger_agent_run(db, repo.id, issue.id, user.id)
                 continue
 
             # 2. Production GitHub API status polling
-            url = f"https://api.github.com/repos/{repo.owner}/{repo.name}/issues/{issue.number}"
+            target_owner = issue.source_owner or repo.owner
+            target_repo = issue.source_repo or repo.name
+            url = f"https://api.github.com/repos/{target_owner}/{target_repo}/issues/{issue.number}"
             headers = {
                 "Authorization": f"token {decrypted_token}",
                 "Accept": "application/vnd.github.v3+json",
@@ -158,10 +198,10 @@ def monitor_assignments_task() -> None:
             
             # Check issue state
             if issue_data.get("state") == "closed":
-                assignment.status = "failed"
+                assignment.status = "rejected"
                 issue.status = "closed"
-                issue.assignment_status = "unassigned"
-                logger.info(f"Issue #{issue.number} was closed. Marking assignment as failed.")
+                issue.assignment_status = "rejected"
+                logger.info(f"Issue #{issue.number} was closed. Marking assignment as rejected.")
                 db.commit()
                 continue
                 
@@ -171,8 +211,8 @@ def monitor_assignments_task() -> None:
                 assignee_login = assignee.get("login")
                 if assignee_login == user.username:
                     # Assigned to current user!
-                    assignment.status = "active"
-                    issue.assignment_status = "assigned_to_user"
+                    assignment.status = "assigned"
+                    issue.assignment_status = "assigned"
                     issue.assignee_username = user.username
                     db.commit()
                     logger.info(f"Successfully assigned to user! Triggering agent run.")
@@ -182,7 +222,7 @@ def monitor_assignments_task() -> None:
                 else:
                     # Assigned to someone else
                     assignment.status = "rejected"
-                    issue.assignment_status = "assigned_to_other"
+                    issue.assignment_status = "rejected"
                     issue.assignee_username = assignee_login
                     db.commit()
                     logger.info(f"Issue assigned to someone else: {assignee_login}. Assignment request rejected.")
@@ -199,8 +239,6 @@ def monitor_assignments_task() -> None:
 def _trigger_agent_run(db: Session, repo_id: str, issue_id: str, user_id: str) -> None:
     """Creates a new agent run and schedules execution."""
     from app.models.run import AgentRun
-    # Import removed
-    from fastapi import BackgroundTasks
     
     # Check if there is already an active run for this issue
     existing_run = db.query(AgentRun).filter(
@@ -213,13 +251,10 @@ def _trigger_agent_run(db: Session, repo_id: str, issue_id: str, user_id: str) -
         return
 
     # Create run entry in pending state
-    # Branch name format: issue-{issue-number}-{slug}
     issue = db.query(Issue).filter(Issue.id == issue_id).first()
     slug = issue.title.lower().replace(":", "").replace("/", "").replace(" ", "-")[:40]
     branch_name = f"issue-{issue.number}-{slug}"
     
-    # Get user settings for preferred LLM provider or default to jules
-    # Let's inspect settings or config. We can check settings or default to jules.
     provider = "jules" # default
     
     new_run = AgentRun(
@@ -231,17 +266,22 @@ def _trigger_agent_run(db: Session, repo_id: str, issue_id: str, user_id: str) -
         status="pending"
     )
     db.add(new_run)
+    
+    # Update assignment status to in_progress
+    assignment = db.query(Assignment).filter(
+        Assignment.issue_id == issue_id,
+        Assignment.user_id == user_id
+    ).first()
+    if assignment:
+        assignment.status = "in_progress"
+        issue.assignment_status = "in_progress"
+
     db.commit()
     db.refresh(new_run)
     
     logger.info(f"Created pending agent run {new_run.id} for issue #{issue.number}. Triggering async runner.")
     
-    # We will trigger the runner in a background thread/task
-    # Using raw thread pool / BackgroundTasks
-    # For now, let's run it. We import the executor inline
     try:
-        from fastapi import BackgroundTasks
-        # We can trigger it asynchronously using a background thread
         import threading
         from app.services.agent_orchestrator import MultiAgentOrchestrator
         orchestrator = MultiAgentOrchestrator()

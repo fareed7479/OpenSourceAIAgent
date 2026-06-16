@@ -139,6 +139,17 @@ def discover_repository_issues_task(repo_id: str, github_token: str = None) -> N
                 assignment_status=assignment_status
             )
 
+            # Parse source owner and source repo from issue_url
+            source_owner, source_repo = None, None
+            if issue_url:
+                try:
+                    parts = issue_url.replace("https://github.com/", "").split("/")
+                    if len(parts) >= 2:
+                        source_owner = parts[0]
+                        source_repo = parts[1]
+                except Exception as parse_err:
+                    logger.warning(f"Failed to parse issue URL {issue_url}: {parse_err}")
+
             # Check if issue exists in database
             existing_issue = db.query(Issue).filter(
                 Issue.repository_id == repo.id,
@@ -160,6 +171,8 @@ def discover_repository_issues_task(repo_id: str, github_token: str = None) -> N
                 existing_issue.github_created_at = github_created_at
                 existing_issue.github_updated_at = github_updated_at
                 existing_issue.comments_count = comments_count
+                existing_issue.source_owner = source_owner
+                existing_issue.source_repo = source_repo
             else:
                 # Create issue
                 new_issue = Issue(
@@ -179,7 +192,9 @@ def discover_repository_issues_task(repo_id: str, github_token: str = None) -> N
                     author_username=author_username,
                     github_created_at=github_created_at,
                     github_updated_at=github_updated_at,
-                    comments_count=comments_count
+                    comments_count=comments_count,
+                    source_owner=source_owner,
+                    source_repo=source_repo
                 )
                 db.add(new_issue)
                 
@@ -259,7 +274,9 @@ def _seed_mock_issues(db: Session, repo: Repository, pref_langs: List[str]) -> N
                 author_username="mock-author",
                 github_created_at=datetime.utcnow(),
                 github_updated_at=datetime.utcnow(),
-                comments_count=2
+                comments_count=2,
+                source_owner=repo.owner,
+                source_repo=repo.name
             )
             db.add(new_issue)
             saved_count += 1

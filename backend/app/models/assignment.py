@@ -11,6 +11,9 @@ class Assignment(Base):
     issue_id = Column(String, ForeignKey("issues.id", ondelete="CASCADE"), nullable=False)
     status = Column(String, default="requested")  # requested, approved, rejected, monitoring, active, completed, failed
     request_comment_id = Column(BigInteger, nullable=True)  # GitHub comment ID where request comment was posted
+    comment_url = Column(String, nullable=True)
+    issue_url = Column(String, nullable=True)
+    repository_url = Column(String, nullable=True)
     
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())

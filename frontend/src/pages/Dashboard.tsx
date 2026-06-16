@@ -45,6 +45,7 @@ interface Repository {
       html_url?: string;
     };
   };
+  clone_path?: string;
   created_at: string;
 }
 

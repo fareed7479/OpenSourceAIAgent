@@ -8,6 +8,9 @@ interface Assignment {
   issue_id: string;
   status: string;
   request_comment_id?: number;
+  comment_url?: string;
+  issue_url?: string;
+  repository_url?: string;
   created_at: string;
   issue?: {
     number: number;
@@ -90,52 +93,84 @@ export const Assignments: React.FC = () => {
           {assignments.map((assignment) => (
             <div key={assignment.id} className="glass-card p-6 rounded-2xl border border-gray-800 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
               
-              <div className="space-y-2 flex-1">
+              <div className="space-y-3 flex-1">
                 <div className="flex items-center gap-2">
                   <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider ${
-                    assignment.status === "active" 
+                    assignment.status === "assigned" 
                       ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" 
+                      : assignment.status === "in_progress" 
+                      ? "bg-indigo-500/10 text-indigo-400 border border-indigo-500/20" 
+                      : assignment.status === "comment_posted" 
+                      ? "bg-blue-500/10 text-blue-400 border border-blue-500/20" 
                       : assignment.status === "requested"
                       ? "bg-amber-500/10 text-amber-400 border border-amber-500/20"
                       : "bg-red-500/10 text-red-400 border border-red-500/20"
                   }`}>
-                    {assignment.status}
+                    {assignment.status.replace(/_/g, " ")}
                   </span>
                   <span className="text-[10px] text-gray-500">Requested: {new Date(assignment.created_at).toLocaleDateString()}</span>
                 </div>
                 
                 {assignment.issue && (
-                  <div>
+                  <div className="space-y-2">
                     <h3 className="font-bold text-white text-base flex items-center gap-2">
                       #{assignment.issue.number} {assignment.issue.title}
-                      <a href={assignment.issue.url} target="_blank" rel="noopener noreferrer" className="text-gray-500 hover:text-gray-300">
+                      <a href={assignment.issue.url} target="_blank" rel="noopener noreferrer" className="text-gray-500 hover:text-gray-300 transition-colors">
                         <ExternalLink className="w-3.5 h-3.5" />
                       </a>
                     </h3>
-                    <p className="text-xs text-gray-400 mt-1">
+                    
+                    <p className="text-xs text-gray-400">
                       {assignment.status === "requested" && (
                         <span className="flex items-center gap-1.5 text-amber-400/80">
                           <Clock className="w-3.5 h-3.5" />
-                          Waiting for repository maintainers to assign this issue.
+                          Waiting to post GitHub request comment.
                         </span>
                       )}
-                      {assignment.status === "active" && (
+                      {assignment.status === "comment_posted" && (
+                        <span className="flex items-center gap-1.5 text-blue-400/80">
+                          <Clock className="w-3.5 h-3.5 animate-pulse" />
+                          Request comment posted. Waiting for repository maintainers to assign this issue.
+                        </span>
+                      )}
+                      {assignment.status === "assigned" && (
                         <span className="flex items-center gap-1.5 text-emerald-400/80">
                           <CheckCircle className="w-3.5 h-3.5" />
-                          Assigned successfully! Agent run has been triggered in the background.
+                          Assigned successfully! Coding workspace is being initialized.
+                        </span>
+                      )}
+                      {assignment.status === "in_progress" && (
+                        <span className="flex items-center gap-1.5 text-indigo-400/80 font-semibold">
+                          <CheckCircle className="w-3.5 h-3.5" />
+                          Assigned successfully! Agent coding flow is currently running.
                         </span>
                       )}
                       {assignment.status === "rejected" && (
-                        <span className="text-red-400">
+                        <span className="text-red-400/80">
                           Issue was assigned to another contributor or closed.
                         </span>
                       )}
                     </p>
+
+                    <div className="flex flex-wrap gap-4 pt-1 text-xs font-semibold">
+                      {assignment.repository_url && (
+                        <a href={assignment.repository_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-indigo-400 hover:text-indigo-300 transition-colors hover:underline">
+                          <ExternalLink className="w-3 h-3" />
+                          Repository Page
+                        </a>
+                      )}
+                      {assignment.comment_url && (
+                        <a href={assignment.comment_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-indigo-400 hover:text-indigo-300 transition-colors hover:underline">
+                          <ExternalLink className="w-3 h-3" />
+                          View Comment on GitHub
+                        </a>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
               
-              {assignment.status === "active" && (
+              {(assignment.status === "assigned" || assignment.status === "in_progress") && (
                 <div className="flex items-center">
                   <span className="text-xs font-semibold text-indigo-400 bg-indigo-950/20 border border-indigo-500/20 py-2 px-4 rounded-xl flex items-center gap-1.5">
                     Coding Loop Triggered

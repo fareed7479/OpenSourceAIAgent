@@ -28,6 +28,8 @@ class Issue(Base):
     github_updated_at = Column(DateTime, nullable=True)
     comments_count = Column(Integer, default=0)
     meta_info = Column(JSON, nullable=True)
+    source_owner = Column(String, nullable=True)
+    source_repo = Column(String, nullable=True)
     
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())

@@ -23,6 +23,8 @@ class IssueResponse(BaseModel):
     github_updated_at: Optional[datetime] = None
     comments_count: Optional[int] = 0
     meta_info: Optional[dict] = None
+    source_owner: Optional[str] = None
+    source_repo: Optional[str] = None
     
     created_at: datetime
     updated_at: datetime

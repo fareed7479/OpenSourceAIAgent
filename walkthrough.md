@@ -131,3 +131,22 @@ Jules Tools CLI v1.0.0-mock
    - Run unit tests: `backend/tests/test_phase3.py` passes all 4 test assertions cleanly (migrations, fork redirect, scoring, API filters).
    - Real E2E Verification: Synced real fork `fareed7479/College_Companion` which redirected to upstream `Yugenjr/College_Companion` and discovered 53 issues successfully.
 
+---
+
+## 📈 Phase 4 Completion (Issue Assignment Request Workflow)
+
+1. **Backend & Database Improvements**:
+   - `backend/app/models/issue.py` & `backend/app/models/assignment.py`: Added `source_owner`/`source_repo` (on `Issue`) and `comment_url`/`issue_url`/`repository_url` (on `Assignment`) columns.
+   - `backend/app/db/init_db.py`: Updated lightweight SQLite migrations to automatically alter tables and add new columns on startup.
+   - `backend/app/services/discovery.py`: Modified sync task to parse and store `source_owner` and `source_repo` from the issue's GitHub URL.
+   - `backend/app/services/assignment.py`: Fixed the 404 error by targeting the upstream repository owner/repo when posting comments on GitHub. Implemented a configurable template system (`Setting.key == "assignment_comment_template"`) with variables `{username}` and `{number}` replacement.
+   - State Machine Tracking: Implemented assignment status state transitions (`discovered`, `requested`, `comment_posted`, `assigned`, `rejected`, `in_progress`, `completed`).
+
+2. **Frontend UI Enhancements**:
+   - `frontend/src/pages/Assignments.tsx`: Upgraded the status badges with custom colors for `comment_posted`, `assigned`, `rejected`, and `in_progress`. Rendered links to "View Comment on GitHub" and "Repository Page".
+
+3. **Verifications Run**:
+   - Run unit tests: `backend/tests/test_phase4.py` passes all assertions (migration check, template replacing, upstream redirection, state updates).
+   - Real E2E Verification: Requested assignment on upstream issue #139 of `Yugenjr/College_Companion`. Comment posted successfully (Comment ID: `4714592992`, URL: `https://github.com/Yugenjr/College_Companion/issues/139#issuecomment-4714592992`), and the state was successfully stored in the database.
+
+

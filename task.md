@@ -1,19 +1,18 @@
 - `[x]` Database & Model Upgrades
-    - `[x]` Add new columns to `Issue` model in `issue.py`
-    - `[x]` Implement automated SQLite migrations in `init_db.py`
+    - `[x]` Add `source_owner` and `source_repo` columns to `Issue` model in `issue.py`
+    - `[x]` Add `comment_url`, `issue_url`, and `repository_url` columns to `Assignment` model in `assignment.py`
+    - `[x]` Update automated migrations in `init_db.py` to add these new columns
 - `[x]` Backend Schema & Routes
-    - `[x]` Update `IssueResponse` schema in `schemas/issue.py`
-    - `[x]` Capture `has_issues` and `parent` fields in `repositories.py`
-    - `[x]` Redirect fork issue discovery to parent in `discovery.py`
-    - `[x]` Map assignment status and capture author, dates, and comments in `discovery.py`
-    - `[x]` Expand ranking engine signals (ELUSOC, comments, age, status) in `ranking.py`
-    - `[x]` Implement label and state parameters in `issues.py` list endpoint
+    - `[x]` Update schemas `IssueResponse` and `AssignmentResponse` in `schemas/issue.py` and `schemas/assignment.py`
+    - `[x]` Capture `source_owner` and `source_repo` during sync in `discovery.py`
+    - `[x]` Implement configurable comment templates with settings fallback in `assignment.py`
+    - `[x]` Resolve 404 error by targeting upstream/source owner/repo for commenting in `assignment.py`
+    - `[x]` Map comment URL and redirect status transitions (`comment_posted`, `assigned`, `rejected`) in `assignment.py`
 - `[x]` Frontend UI Enhancements
-    - `[x]` Add label filter input/dropdown in `Issues.tsx`
-    - `[x]` Add state filter tabs (Open, Closed, All) in `Issues.tsx`
-    - `[x]` Create Issue Details Modal showing metadata and suitability score reasons in `Issues.tsx`
+    - `[x]` Update state badges in `Assignments.tsx`
+    - `[x]` Add request comment links and target repository links to cards in `Assignments.tsx`
 - `[x]` Testing & Verification
-    - `[x]` Write and run Phase 3 automated test suite `test_phase3.py`
-    - `[x]` Perform real verification using `fareed7479/College_Companion` and upstream redirects
+    - `[x]` Write and run Phase 4 automated test suite `test_phase4.py`
+    - `[x]` Perform real validation by requesting assignment on a synced upstream issue
 - `[x]` Documentation
-    - `[x]` Compile and commit Phase 3 Completion Report
+    - `[x]` Compile and commit Phase 4 Completion Report
