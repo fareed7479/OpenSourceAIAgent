@@ -98,7 +98,9 @@ async def register_repository(
                     "html_url": repo_info.get("html_url"),
                     "updated_at": repo_info.get("updated_at"),
                     "stargazers_count": repo_info.get("stargazers_count", 0),
-                    "open_issues_count": repo_info.get("open_issues_count", 0)
+                    "open_issues_count": repo_info.get("open_issues_count", 0),
+                    "has_issues": repo_info.get("has_issues", True),
+                    "parent": repo_info.get("parent")
                 }
             }
             
@@ -125,7 +127,9 @@ async def register_repository(
                 "html_url": f"https://github.com/{owner}/{name}",
                 "updated_at": "2026-06-16T00:00:00Z",
                 "stargazers_count": 42,
-                "open_issues_count": 3
+                "open_issues_count": 3,
+                "has_issues": True,
+                "parent": None
             }
         }
 
@@ -310,7 +314,9 @@ async def sync_repository(
                 "html_url": repo_info.get("html_url"),
                 "updated_at": repo_info.get("updated_at"),
                 "stargazers_count": repo_info.get("stargazers_count", 0),
-                "open_issues_count": repo_info.get("open_issues_count", 0)
+                "open_issues_count": repo_info.get("open_issues_count", 0),
+                "has_issues": repo_info.get("has_issues", True),
+                "parent": repo_info.get("parent")
             }
             repo.meta_info = meta
             db.commit()
@@ -337,7 +343,9 @@ async def sync_repository(
             "html_url": f"https://github.com/{repo.owner}/{repo.name}",
             "updated_at": "2026-06-16T00:00:00Z",
             "stargazers_count": 100,
-            "open_issues_count": 5
+            "open_issues_count": 5,
+            "has_issues": True,
+            "parent": None
         }
         repo.meta_info = meta
         db.commit()

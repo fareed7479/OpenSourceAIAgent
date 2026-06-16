@@ -1,83 +1,100 @@
-# Implementation Plan - Phase 2 Audit, Debugging, and Production Completion
+# Implementation Plan - Phase 3 Audit, Debugging, and Production Completion
 
-This plan outlines the steps to audit, verify, debug, repair, and complete the Repository Registration and Repository Discovery/Sync workflows.
+This plan outlines the steps to audit, verify, debug, repair, and complete the Issue Discovery, Storage, Ranking, Filtering, and Dashboard workflows.
 
 ## Problem Description
 
-1. **GitHub API Suffix Sensitivity (404 Error)**: When registering a repository, if the user enters a URL ending with `.git` (e.g., `https://github.com/owner/repo.git`), the backend parses the repository name as `repo.git`. The subsequent GitHub API query to `https://api.github.com/repos/owner/repo.git` returns `404 Not Found`. This causes registration to fail with: *"Repository not found on GitHub. Verify ownership and visibility settings."*
-2. **Missing Discovery Interface**: There is no UI or backend endpoint to fetch and list the user's actual GitHub repositories. The frontend dashboard only has a raw URL input text box, violating the Acceptance Criteria which require viewing, searching, filtering, and selecting from the user's GitHub repositories.
-3. **Missing Sync/Refresh Action**: No sync/refresh mechanism exists to update the repository's metadata (fork status, visibility, topics, description, default branch, etc.) and discover issues on-demand.
-
----
-
-## User Review Required
-
-> [!IMPORTANT]
-> - **URL Cleaning**: The backend will automatically strip the `.git` suffix and any trailing slashes from entered URLs before calling the GitHub API and before saving the repository record.
-> - **Metadata Storage**: Since migrating the database schema is not desirable at this stage, all extra GitHub metadata (e.g., Description, Fork Status, Visibility, Owner, Language, Topics, Clone URL, GitHub URL, and Last Updated) will be structured and stored within the existing `meta_info` JSON column.
-> - **Mock Bypass Support**: For developer mode or mock users, both the discovery endpoint and sync endpoint will return high-fidelity mock data to ensure local test suites and sandbox demos run successfully.
-
----
-
-## Open Questions
-
-> [!NOTE]
-> We will implement the GitHub Repository list directly in the dashboard UI as a toggled tab ("Discover Repositories") next to the "My Registered Repositories" tab. If you prefer a different layout (e.g. side-by-side columns or a separate page), let us know, but a tabbed layout is typically clean and mobile-friendly.
+1. **Missing Schema Fields**: The `Issue` database model is missing fields requested by the user: `author_username` (Author), `github_created_at` (Created Date), `github_updated_at` (Updated Date), `comments_count` (Comments Count), and `meta_info` (for flexible JSON metadata).
+2. **Incomplete Sync & Fork Redirection**:
+   - Issue tracker settings on forks are often disabled, redirecting to the parent/upstream repo. Currently, the sync fetches from the fork regardless, returning empty lists or failing.
+   - Assigned issues are ignored during sync instead of being stored with `assigned_to_other` status.
+3. **Missing Filters**: The frontend is missing selectors to filter by label and status (open/closed).
+4. **Missing Issue Details Modal**: The frontend lacks a details modal to view full descriptions, ranking reasoning breakdowns, author info, comment counts, and assignment controls.
+5. **Baseline Ranking Engine**: The ranking engine only uses description clarity and basic language match, missing signals like ELUSOC labels, comments counts, issue age, and assignment status.
 
 ---
 
 ## Proposed Changes
 
-### Backend Components
+### Database & Schema Migration
 
-#### [MODIFY] [repositories.py](file:///d:/PROJECTS/OpenSource%20Agent%20Project/backend/app/api/repositories.py)
-- Import `parse_github_url` utility or add inline parsing logic to strip `.git` and trailing slashes.
-- Retrieve full repository metadata (Name, Description, default branch, fork status, visibility, owner, language, topics, clone URL, html URL, updated_at) from the GitHub API response during registration and store it in `meta_info["github_metadata"]`.
-- `[NEW]` Add `GET /api/v1/repositories/github` route to fetch the authenticated user's repositories (forks and originals) from GitHub.
-- `[NEW]` Add `POST /api/v1/repositories/{repo_id}/sync` route to refresh repository metadata from the GitHub API and trigger issue discovery.
-- Ensure proper routing order so that `/github` does not conflict with `/{repo_id}`.
+#### [MODIFY] [issue.py](file:///d:/PROJECTS/OpenSource%20Agent%20Project/backend/app/models/issue.py)
+- Add columns:
+  - `author_username` (String, nullable=True)
+  - `github_created_at` (DateTime, nullable=True)
+  - `github_updated_at` (DateTime, nullable=True)
+  - `comments_count` (Integer, default=0)
+  - `meta_info` (JSON, nullable=True)
+
+#### [MODIFY] [init_db.py](file:///d:/PROJECTS/OpenSource%20Agent%20Project/backend/app/db/init_db.py)
+- Implement an automated `run_migrations` function on database startup to check if the new columns exist on the `issues` table and run `ALTER TABLE issues ADD COLUMN ...` statements if they are missing.
 
 ---
 
-### Frontend Components
+### Backend Logic & Services
 
-#### [MODIFY] [Dashboard.tsx](file:///d:/PROJECTS/OpenSource%20Agent%20Project/frontend/src/pages/Dashboard.tsx)
-- Add a tab selection menu at the top: **My Registered Repositories** and **Discover GitHub Repositories**.
-- In **Discover GitHub Repositories**:
-  - Fetch available repositories from the backend `GET /repositories/github` endpoint.
-  - Render a search filter input (filter by repository name).
-  - Add quick filter buttons: **All**, **Forks**, **Original**.
-  - Show description, fork status (with icon), visibility status, and primary language for each repo.
-  - Render a **Register** button for each repository. Disable or show "Registered" if the repository is already in the local database.
-- In **My Registered Repositories**:
-  - Show full metadata details if available in `meta_info.github_metadata`.
-  - Add a **Sync Now** button next to each repository that triggers `POST /repositories/{repo_id}/sync` and displays a loading spinner.
+#### [MODIFY] [issue.py](file:///d:/PROJECTS/OpenSource%20Agent%20Project/backend/app/schemas/issue.py)
+- Update `IssueResponse` to include the new fields: `author_username`, `github_created_at`, `github_updated_at`, `comments_count`, and `meta_info`.
+
+#### [MODIFY] [repositories.py](file:///d:/PROJECTS/OpenSource%20Agent%20Project/backend/app/api/repositories.py)
+- Fetch and store `"has_issues"` (boolean) and `"parent"` (dict) in the repository's `meta_info["github_metadata"]` upon registration and sync.
+
+#### [MODIFY] [discovery.py](file:///d:/PROJECTS/OpenSource%20Agent%20Project/backend/app/services/discovery.py)
+- Modify `discover_repository_issues_task`:
+  - Retrieve `has_issues` and `parent` from the repository metadata. If `has_issues` is False and it's a fork, redirect the issues API query to the parent/upstream repository.
+  - Set request param `"state": "all"` to fetch both open and closed issues.
+  - Do not discard assigned issues. Map their assignment status correctly.
+  - Parse and store: `author_username`, `github_created_at`, `github_updated_at`, `comments_count`, and `meta_info` for each issue.
+- Update `_seed_mock_issues` to seed mock issues with the new fields.
+
+#### [MODIFY] [ranking.py](file:///d:/PROJECTS/OpenSource%20Agent%20Project/backend/app/services/ranking.py)
+- Expand `evaluate_issue_difficulty_and_score` to incorporate:
+  - **ELUSOC / Bounty** labels (+20 points)
+  - **Beginner / Help Wanted** labels (+10 points)
+  - **Bug / Documentation / Enhancement** labels
+  - **Comments count** (+2 points per comment up to +10, penalty if > 20)
+  - **Issue age** (+10 if < 30 days, -10 if > 180 days)
+  - **Assignment status** (reduction of 50 points if assigned to other/in progress)
+
+#### [MODIFY] [issues.py](file:///d:/PROJECTS/OpenSource%20Agent%20Project/backend/app/api/issues.py)
+- Update `list_issues` route:
+  - Add `state: Optional[str] = Query(None)` to support filtering by state (`open`, `closed`, `all`). Default to `open` if omitted.
+  - Add `label: Optional[str] = Query(None)` to support filtering by label.
+
+---
+
+### Frontend Enhancements
+
+#### [MODIFY] [Issues.tsx](file:///d:/PROJECTS/OpenSource%20Agent%20Project/frontend/src/pages/Issues.tsx)
+- Add UI controls:
+  - **Label dropdown/input** to filter issues by labels.
+  - **State selector tab/dropdown** to filter by Open, Closed, or All.
+- Update issue lists to display comments count, author username, and GitHub updated date.
+- Implement a modal dialog for **Issue Details**:
+  - Displays title, description (scrollable), labels, author, comments, parent repository, and assignment status.
+  - Renders a visual breakdown of the **AI Suitability Score** with ranking reasoning.
+  - Provides assignment controls ("Request Assignment") from inside the modal.
 
 ---
 
 ## Verification Plan
 
 ### Automated Tests
-We will write a suite of tests in:
-#### [NEW] [test_phase2.py](file:///d:/PROJECTS/OpenSource%20Agent%20Project/backend/tests/test_phase2.py)
-This test suite will verify:
-1. Registration cleaning logic (correctly parsing `https://github.com/owner/repo.git` and `https://github.com/owner/repo/` to `owner` and `repo`).
-2. Registering a repo fetches metadata and stores it in `meta_info`.
-3. The new `/repositories/github` endpoint returns the list of GitHub repositories (verified under mock mode).
-4. The `/repositories/{repo_id}/sync` endpoint updates metadata and triggers issue discovery.
+Create a new automated test file:
+#### [NEW] [test_phase3.py](file:///d:/PROJECTS/OpenSource%20Agent%20Project/backend/tests/test_phase3.py)
+Verify:
+1. Database migrations run and columns are created successfully.
+2. Fork redirection fetches from parent if issues tracker is disabled on fork.
+3. Ranking engine scores correctly according to comments count, age, and label signals.
+4. `/issues` endpoint filters correctly by state, label, search keywords, and repository.
 
-To run tests:
+To run:
 ```bash
-& "d:\PROJECTS\OpenSource Agent Project\venv\Scripts\python.exe" -m unittest backend/tests/test_phase2.py
+& "d:\PROJECTS\OpenSource Agent Project\venv\Scripts\python.exe" -m unittest tests.test_phase3
 ```
 
 ### Manual Verification
-1. Run backend: `python -m uvicorn app.main:app --reload`
-2. Run frontend: `npm run dev`
-3. Log in via GitHub OAuth.
-4. On the Dashboard:
-   - Verify that all repositories (including forks) are loaded under the "Discover GitHub Repositories" tab.
-   - Type in the search box to filter by name.
-   - Toggle filters between "All", "Forks", and "Original".
-   - Select a fork and click "Register". Verify registration succeeds and transitions to "Cloning" state.
-   - Click "Sync Now" on a registered repository and verify that metadata and issues are refreshed.
+1. Log in, sync `fareed7479/College_Companion`.
+2. Verify that if issues tracker is disabled on the fork, the issues from parent are synced.
+3. Open Issues page. Try filters (State, Label, Repo, Search) and verify results.
+4. Click on an issue to open the details modal. Verify all details, score breakdown, and comments are visible.

@@ -21,14 +21,25 @@ def list_issues(
     difficulty: Optional[str] = Query(None, description="Filter by easy, medium, or hard"),
     label: Optional[str] = Query(None, description="Filter by label"),
     search: Optional[str] = Query(None, description="Search search term in title or description"),
+    state: Optional[str] = Query("open", description="Filter by state (open, closed, or all)"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
-    List open issues across all user repositories, sorted by priority score (descending).
+    List issues across all user repositories, sorted by suitability score (descending).
     """
-    query = db.query(Issue).join(Repository).filter(Repository.user_id == current_user.id, Issue.status == "open")
+    query = db.query(Issue).join(Repository).filter(Repository.user_id == current_user.id)
     
+    # Apply state filter
+    if state and state.lower() == "closed":
+        query = query.filter(Issue.status == "closed")
+    elif state and state.lower() == "all":
+        # Fetch both open and closed issues
+        pass
+    else:
+        # Default to open
+        query = query.filter(Issue.status == "open")
+        
     if repository_id:
         query = query.filter(Issue.repository_id == repository_id)
         
@@ -37,8 +48,6 @@ def list_issues(
         
     if label:
         # Check if the labels JSON array contains the label
-        # SQLite vs PostgreSQL label querying fallback
-        # A simple check: query for label match
         query = query.filter(Issue.labels.like(f"%{label}%"))
         
     if search:

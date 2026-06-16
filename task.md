@@ -1,17 +1,19 @@
-- `[/]` Audit & Verification
-    - `[x]` Verify GitHub OAuth scopes for fareed7479
-- `[x]` Backend Implementation
-    - `[x]` URL cleaning & parsing logic in `/register`
-    - `[x]` Fetch & store metadata (including stars, open issues, fork status, visibility, last updated) in `meta_info`
-    - `[x]` Implement `GET /repositories/github` (discovery)
-    - `[x]` Implement `POST /repositories/{repo_id}/sync` (refresh metadata/issues)
-    - `[x]` Validate workspace creation, local path storage, and clone status updates
-- `[x]` Frontend UI Enhancement
-    - `[x]` Add tabbed interface: "My Registered Repositories" & "Discover GitHub Repositories"
-    - `[x]` Support search and filters (All, Forks, Original) in discovery tab
-    - `[x]` Support one-click Register and Sync actions with visual feedback
-- `[x]` Verification & Testing
-    - `[x]` Write and run Phase 2 automated test suite `test_phase2.py`
-    - `[x]` End-to-end verification using a real repository (e.g. `fareed7479/College_Companion`)
+- `[x]` Database & Model Upgrades
+    - `[x]` Add new columns to `Issue` model in `issue.py`
+    - `[x]` Implement automated SQLite migrations in `init_db.py`
+- `[x]` Backend Schema & Routes
+    - `[x]` Update `IssueResponse` schema in `schemas/issue.py`
+    - `[x]` Capture `has_issues` and `parent` fields in `repositories.py`
+    - `[x]` Redirect fork issue discovery to parent in `discovery.py`
+    - `[x]` Map assignment status and capture author, dates, and comments in `discovery.py`
+    - `[x]` Expand ranking engine signals (ELUSOC, comments, age, status) in `ranking.py`
+    - `[x]` Implement label and state parameters in `issues.py` list endpoint
+- `[x]` Frontend UI Enhancements
+    - `[x]` Add label filter input/dropdown in `Issues.tsx`
+    - `[x]` Add state filter tabs (Open, Closed, All) in `Issues.tsx`
+    - `[x]` Create Issue Details Modal showing metadata and suitability score reasons in `Issues.tsx`
+- `[x]` Testing & Verification
+    - `[x]` Write and run Phase 3 automated test suite `test_phase3.py`
+    - `[x]` Perform real verification using `fareed7479/College_Companion` and upstream redirects
 - `[x]` Documentation
-    - `[x]` Compile and commit Phase 2 Completion Report
+    - `[x]` Compile and commit Phase 3 Completion Report

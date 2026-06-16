@@ -56,7 +56,13 @@ def clone_and_analyze_repo_task(repo_id: str, github_token: str = None) -> None:
             repo.test_command = analysis_results.get("test_command")
             repo.lint_command = analysis_results.get("lint_command")
             repo.contribution_rules = analysis_results.get("contribution_rules")
-            repo.meta_info = analysis_results.get("meta_info")
+            
+            # Merge existing metadata with analysis metadata
+            existing_meta = dict(repo.meta_info or {})
+            analysis_meta = analysis_results.get("meta_info") or {}
+            existing_meta.update(analysis_meta)
+            repo.meta_info = existing_meta
+            
             repo.status = "cloned"
             
             logger.info(f"Repository {repo.owner}/{repo.name} analysis complete. Triggering indexing...")

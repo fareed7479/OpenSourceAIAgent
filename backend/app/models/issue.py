@@ -23,6 +23,12 @@ class Issue(Base):
     assignment_status = Column(String, default="unassigned")  # unassigned, requested, assigned_to_user, assigned_to_other
     assignee_username = Column(String, nullable=True)
     
+    author_username = Column(String, nullable=True)
+    github_created_at = Column(DateTime, nullable=True)
+    github_updated_at = Column(DateTime, nullable=True)
+    comments_count = Column(Integer, default=0)
+    meta_info = Column(JSON, nullable=True)
+    
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     

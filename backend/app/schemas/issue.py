@@ -17,6 +17,13 @@ class IssueResponse(BaseModel):
     status: str
     assignment_status: str
     assignee_username: Optional[str] = None
+    
+    author_username: Optional[str] = None
+    github_created_at: Optional[datetime] = None
+    github_updated_at: Optional[datetime] = None
+    comments_count: Optional[int] = 0
+    meta_info: Optional[dict] = None
+    
     created_at: datetime
     updated_at: datetime
 

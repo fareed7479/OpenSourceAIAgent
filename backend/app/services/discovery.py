@@ -1,6 +1,7 @@
 import httpx
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
+from datetime import datetime
 from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
@@ -10,6 +11,15 @@ from app.models.settings import Setting
 from app.services.ranking import evaluate_issue_difficulty_and_score
 
 logger = logging.getLogger(__name__)
+
+def parse_github_datetime(date_str: str) -> Optional[datetime]:
+    if not date_str:
+        return None
+    try:
+        clean_str = date_str.replace("Z", "+00:00")
+        return datetime.fromisoformat(clean_str)
+    except Exception:
+        return None
 
 def discover_repository_issues_task(repo_id: str, github_token: str = None) -> None:
     """
@@ -40,19 +50,38 @@ def discover_repository_issues_task(repo_id: str, github_token: str = None) -> N
             _seed_mock_issues(db, repo, pref_langs)
             return
 
+        # Check if issue tracker is disabled on fork and redirects upstream
+        target_owner = repo.owner
+        target_name = repo.name
+        
+        meta = repo.meta_info or {}
+        gh_meta = meta.get("github_metadata", {})
+        has_issues = gh_meta.get("has_issues", True)
+        is_fork = gh_meta.get("fork", False)
+        
+        if not has_issues and is_fork:
+            parent_info = gh_meta.get("parent")
+            if parent_info:
+                parent_owner = parent_info.get("owner", {}).get("login")
+                parent_name = parent_info.get("name")
+                if parent_owner and parent_name:
+                    target_owner = parent_owner
+                    target_name = parent_name
+                    logger.info(f"Fork issues disabled. Redirecting issue sync to upstream: {target_owner}/{target_name}")
+
         # Fetch issues from GitHub API
-        url = f"https://api.github.com/repos/{repo.owner}/{repo.name}/issues"
+        url = f"https://api.github.com/repos/{target_owner}/{target_name}/issues"
         headers = {
             "Authorization": f"token {github_token}",
             "Accept": "application/vnd.github.v3+json",
             "User-Agent": "OpenSource-AI-Contribution-Agent"
         }
         params = {
-            "state": "open",
+            "state": "all",
             "per_page": 100
         }
         
-        logger.info(f"Fetching open issues from {url}...")
+        logger.info(f"Fetching issues from {url}...")
         response = httpx.get(url, headers=headers, params=params, timeout=15.0)
         
         if response.status_code != 200:
@@ -66,10 +95,6 @@ def discover_repository_issues_task(repo_id: str, github_token: str = None) -> N
             # GitHub API returns pull requests inside the issues endpoint. Filter them out.
             if "pull_request" in gh_issue:
                 continue
-                
-            # Filter: ignore assigned issues
-            if gh_issue.get("assignee") is not None or (gh_issue.get("assignees") and len(gh_issue.get("assignees")) > 0):
-                continue
 
             labels = [label.get("name", "") for label in gh_issue.get("labels", [])]
             title = gh_issue.get("title", "")
@@ -78,13 +103,40 @@ def discover_repository_issues_task(repo_id: str, github_token: str = None) -> N
             issue_url = gh_issue.get("html_url")
             github_issue_id = gh_issue.get("id")
 
+            # Parse extra fields
+            author_username = gh_issue.get("user", {}).get("login")
+            comments_count = gh_issue.get("comments", 0)
+            github_created_at = parse_github_datetime(gh_issue.get("created_at"))
+            github_updated_at = parse_github_datetime(gh_issue.get("updated_at"))
+            status = gh_issue.get("state", "open")
+
+            # Get assignee username and assignment status
+            assignees_list = gh_issue.get("assignees", [])
+            github_assignee = gh_issue.get("assignee")
+            assignee_username = None
+            if github_assignee:
+                assignee_username = github_assignee.get("login")
+            elif assignees_list:
+                assignee_username = assignees_list[0].get("login")
+                
+            if assignee_username:
+                if repo.user and repo.user.username and assignee_username.lower() == repo.user.username.lower():
+                    assignment_status = "assigned_to_user"
+                else:
+                    assignment_status = "assigned_to_other"
+            else:
+                assignment_status = "unassigned"
+
             # Rank the issue
             eval_results = evaluate_issue_difficulty_and_score(
                 title=title,
                 body=body,
                 labels=labels,
                 repo_language=repo.language or "unknown",
-                user_preferred_languages=pref_langs
+                user_preferred_languages=pref_langs,
+                comments_count=comments_count,
+                github_created_at=github_created_at,
+                assignment_status=assignment_status
             )
 
             # Check if issue exists in database
@@ -101,7 +153,13 @@ def discover_repository_issues_task(repo_id: str, github_token: str = None) -> N
                 existing_issue.difficulty = eval_results["difficulty"]
                 existing_issue.score = eval_results["score"]
                 existing_issue.ranking_reason = eval_results["ranking_reason"]
-                existing_issue.status = "open"
+                existing_issue.status = status
+                existing_issue.assignment_status = assignment_status
+                existing_issue.assignee_username = assignee_username
+                existing_issue.author_username = author_username
+                existing_issue.github_created_at = github_created_at
+                existing_issue.github_updated_at = github_updated_at
+                existing_issue.comments_count = comments_count
             else:
                 # Create issue
                 new_issue = Issue(
@@ -115,8 +173,13 @@ def discover_repository_issues_task(repo_id: str, github_token: str = None) -> N
                     difficulty=eval_results["difficulty"],
                     score=eval_results["score"],
                     ranking_reason=eval_results["ranking_reason"],
-                    status="open",
-                    assignment_status="unassigned"
+                    status=status,
+                    assignment_status=assignment_status,
+                    assignee_username=assignee_username,
+                    author_username=author_username,
+                    github_created_at=github_created_at,
+                    github_updated_at=github_updated_at,
+                    comments_count=comments_count
                 )
                 db.add(new_issue)
                 
@@ -174,7 +237,10 @@ def _seed_mock_issues(db: Session, repo: Repository, pref_langs: List[str]) -> N
                 body=mock["body"],
                 labels=mock["labels"],
                 repo_language=repo.language or "unknown",
-                user_preferred_languages=pref_langs
+                user_preferred_languages=pref_langs,
+                comments_count=2,
+                github_created_at=datetime.utcnow(),
+                assignment_status="unassigned"
             )
 
             new_issue = Issue(
@@ -189,7 +255,11 @@ def _seed_mock_issues(db: Session, repo: Repository, pref_langs: List[str]) -> N
                 score=eval_results["score"],
                 ranking_reason=eval_results["ranking_reason"],
                 status="open",
-                assignment_status="unassigned"
+                assignment_status="unassigned",
+                author_username="mock-author",
+                github_created_at=datetime.utcnow(),
+                github_updated_at=datetime.utcnow(),
+                comments_count=2
             )
             db.add(new_issue)
             saved_count += 1
