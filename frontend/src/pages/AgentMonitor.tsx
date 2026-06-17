@@ -961,6 +961,64 @@ export const AgentMonitor: React.FC = () => {
                     </div>
                   )}
 
+                  {/* Validation Results Panel */}
+                  {(() => {
+                    const validationLog = selectedRun?.logs.find(
+                      (l) => l.stage === "validation" && l.message.includes("Validation checks complete")
+                    );
+                    const validationData = validationLog?.data;
+                    if (!validationData) return null;
+
+                    return (
+                      <div className="bg-gray-950/30 border border-gray-900 p-5 rounded-xl space-y-4">
+                        <h4 className="text-xs uppercase font-extrabold text-gray-400 tracking-wider flex items-center gap-1.5">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                          Validation Build & Test Results
+                        </h4>
+                        
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {/* Test Suite */}
+                          <div className="space-y-2">
+                            <div className="flex justify-between items-center bg-black/40 border border-gray-900 p-3 rounded-lg">
+                              <span className="text-xs font-bold text-white">Unit Tests Run</span>
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                                validationData.test_exit_code === 0 
+                                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" 
+                                  : "bg-red-500/10 text-red-400 border-red-500/20"
+                              }`}>
+                                Exit Code: {validationData.test_exit_code}
+                              </span>
+                            </div>
+                            {(validationData.test_stdout || validationData.test_stderr) && (
+                              <pre className="p-3 bg-black/40 border border-gray-900 text-[10px] text-gray-300 font-mono overflow-auto max-h-36 rounded-lg whitespace-pre-wrap leading-relaxed scrollbar-thin">
+                                {validationData.test_stdout || validationData.test_stderr}
+                              </pre>
+                            )}
+                          </div>
+
+                          {/* Linter Checks */}
+                          <div className="space-y-2">
+                            <div className="flex justify-between items-center bg-black/40 border border-gray-900 p-3 rounded-lg">
+                              <span className="text-xs font-bold text-white">Linter & Code Style Checks</span>
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                                validationData.lint_exit_code === 0 
+                                  ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" 
+                                  : "bg-red-500/10 text-red-400 border-red-500/20"
+                              }`}>
+                                Exit Code: {validationData.lint_exit_code}
+                              </span>
+                            </div>
+                            {(validationData.lint_stdout || validationData.lint_stderr) && (
+                              <pre className="p-3 bg-black/40 border border-gray-900 text-[10px] text-gray-300 font-mono overflow-auto max-h-36 rounded-lg whitespace-pre-wrap leading-relaxed scrollbar-thin">
+                                {validationData.lint_stdout || validationData.lint_stderr}
+                              </pre>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
                   {/* Self-Healing Attempts */}
                   <div className="space-y-3">
                     <h4 className="text-xs uppercase font-extrabold text-gray-400 tracking-wider">

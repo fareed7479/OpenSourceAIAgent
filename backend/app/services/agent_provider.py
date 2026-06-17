@@ -66,7 +66,10 @@ class JulesCodingAgent(BaseCodingAgent):
         try:
             # Check if jules command is available
             use_shell = os.name == "nt"
-            res = subprocess.run(["jules", "--version"], shell=use_shell, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            env = os.environ.copy()
+            if self.api_key:
+                env["GEMINI_API_KEY"] = self.api_key
+            res = subprocess.run(["jules", "--version"], shell=use_shell, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             if res.returncode == 0:
                 logger.info("Jules CLI detected. Spawning subprocess to implement fix...")
                 # Write issue description to a temp file first for Jules to ingest
@@ -80,6 +83,7 @@ class JulesCodingAgent(BaseCodingAgent):
                 jules_run = subprocess.run(
                     cmd,
                     cwd=workspace_path,
+                    env=env,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
