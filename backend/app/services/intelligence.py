@@ -35,17 +35,29 @@ def scan_and_index_repository(repo_id: str, workspace_path: str) -> None:
     # 1. Clear old indexes for this repository
     try:
         db.query(CodeSearchIndex).filter(CodeSearchIndex.repository_id == repo_id).delete()
+        from app.models.extensions import CodeSymbol, CodeRelation
+        db.query(CodeSymbol).filter(CodeSymbol.repository_id == repo_id).delete()
+        db.query(CodeRelation).filter(CodeRelation.repository_id == repo_id).delete()
         db.commit()
     except Exception as e:
         logger.error(f"Error clearing old indexes: {e}")
         db.rollback()
         
+    # Build maps of all workspace file basenames to relative paths for import resolution
+    all_files_map = {}
+    for r, ds, fs in os.walk(workspace_path):
+        ds[:] = [d for d in ds if d not in exclude_dirs]
+        for f in fs:
+            ext = os.path.splitext(f)[1].lower()
+            if ext in include_extensions:
+                r_path = os.path.relpath(os.path.join(r, f), workspace_path)
+                all_files_map[os.path.splitext(f)[0]] = r_path
+
     logger.info(f"Scanning codebase for indexing symbols: {workspace_path}...")
     indexed_symbols_count = 0
     embedded_chunks_count = 0
     
     for root, dirs, files in os.walk(workspace_path):
-        # Exclude directories
         dirs[:] = [d for d in dirs if d not in exclude_dirs]
         
         for file in files:
@@ -63,22 +75,49 @@ def scan_and_index_repository(repo_id: str, workspace_path: str) -> None:
                 if not content.strip():
                     continue
 
-                # 2. Extract AST Symbols
-                symbols = _extract_symbols(rel_path, content)
+                # 2. Extract AST Symbols & Imports
+                from app.services.ast_parser import ASTParser
+                from app.services.knowledge_graph import KnowledgeGraphManager
+                
+                parsed_data = ASTParser.parse_file(rel_path, content)
+                symbols = []
+                lines = content.splitlines()
                 
                 # Save symbols in SQL Search Index
-                for sym_name, sym_type, start, end, sym_content in symbols:
+                for sym in parsed_data["symbols"]:
+                    sym_content = "\n".join(lines[sym["start_line"] - 1 : sym["end_line"]])
+                    symbols.append((sym["name"], sym["type"], sym["start_line"], sym["end_line"], sym_content))
+                    
                     record = CodeSearchIndex(
                         repository_id=repo_id,
                         filepath=rel_path,
-                        symbol_name=sym_name,
-                        symbol_type=sym_type,
-                        start_line=start,
-                        end_line=end,
+                        symbol_name=sym["name"],
+                        symbol_type=sym["type"],
+                        start_line=sym["start_line"],
+                        end_line=sym["end_line"],
                         content=sym_content
                     )
                     db.add(record)
                     indexed_symbols_count += 1
+                    
+                    KnowledgeGraphManager.add_symbol(
+                        db, repo_id, rel_path, sym["name"], sym["type"], sym["start_line"], sym["end_line"]
+                    )
+                    
+                # Save API routes
+                for route in parsed_data["routes"]:
+                    KnowledgeGraphManager.add_symbol(
+                        db, repo_id, rel_path, f"{route['method']} {route['path']}", "route", 1, 1
+                    )
+                    
+                # Resolve import paths to build Knowledge Graph edges
+                for imp in parsed_data["imports"]:
+                    imp_base = os.path.splitext(os.path.basename(imp))[0]
+                    if imp_base in all_files_map:
+                        target_file = all_files_map[imp_base]
+                        # Don't add import edges to self
+                        if target_file != rel_path:
+                            KnowledgeGraphManager.add_relation(db, repo_id, rel_path, target_file, "imports")
                     
                 # 3. Generate Semantic Embeddings for Chunks
                 # Split content into ~1000-character logical chunks for vector index
