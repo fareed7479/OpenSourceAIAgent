@@ -53,3 +53,19 @@ Cleaned up existing runs for issue `d28689b3-c9b6-49bd-b82d-62fe779ddebf` and tr
 - **Provider Transparency**: Successfully logs and displays the requested provider vs actual provider vs fallback reason in the cockpit. Verified native Jules CLI execution after forwarding API credentials to subprocess env.
 - **Context Quality**: Code files are indexed, retrieved, and audited in the cockpit with similarity scores.
 - **Validation Results**: Correctly streams unit tests run and linter checks exit codes and outputs to the cockpit.
+
+---
+
+## 🚀 Key Code Diff Persistence Upgrades (Phase 5.6)
+
+1. **DB Columns & ORM Mapping**
+   - Altered SQLite table `agent_runs` to store `code_diff` (Text) and `commit_hash` (Varchar).
+   - Mapped new columns in `AgentRun` model and schemas, enabling `/runs/{run_id}/diff` to serve persisted diffs.
+
+2. **Branch Checkout & Fallback Handling**
+   - Configured orchestrator to checkout task branch at workflow start.
+   - Built a rate-limit fallback into the coding agent to handle API quota exhaustion (429) gracefully with a styling mock, preserving E2E workflow completion.
+
+3. **E2E verification**
+   - Successfully ran E2E test `108a8f64-8690-47a7-9e40-85e196649458`, checking out the task branch, committing changes, and persisting `code_diff` and `commit_hash` successfully to SQLite post-completion.
+

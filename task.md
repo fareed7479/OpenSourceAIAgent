@@ -1,9 +1,7 @@
-- `[x]` Phase 5.5 Observability Cockpit
-  - `[x]` Backend Schema: Add repository and issue summaries to AgentRunResponse
-  - `[x]` Backend Provider Transparency: Update coding providers to return metadata
-  - `[x]` Backend Orchestration: Save provider metadata in run record on CodingAgent completion
-  - `[x]` Backend Context Agent: Query 10 semantic docs, build retrieval details, load top 4, log details
-  - `[x]` Backend Indexing: Add CSS, SCSS, HTML, Vue, Svelte, JSX extensions to code search indexer
-  - `[x]` Backend API: Create GET /runs/{run_id}/context-metrics endpoint
-  - `[x]` Frontend Redesign: Upgrade AgentMonitor.tsx with Execution Details, Provider Details, and Context Quality panels
-  - `[x]` E2E Validation: Rerun real issue, check cockpit live, write Phase 5.5 completion report
+- `[x]` Backend: Save code diff in run.code_diff on CodingAgent completion
+- `[x]` Backend: Save code diff in run.code_diff on self-healing Correction validation pass
+- `[x]` Backend: Save commit hash in run.commit_hash on PrAgent completion
+- `[x]` Backend: Retrieve persisted code_diff & commit_hash in /runs/{run_id}/diff API
+- `[x]` Frontend: Display commit hash and branch in Code Diffs tab
+- `[x]` Frontend: Add collapsible file sections for diff patch viewer
+- `[x]` E2E Verification: Run E2E test, assert diffs are persisted & displayed after completion
