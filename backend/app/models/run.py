@@ -16,6 +16,8 @@ class AgentRun(Base):
     actual_provider = Column(String, nullable=True)
     fallback_provider = Column(String, nullable=True)
     fallback_reason = Column(String, nullable=True)
+    code_diff = Column(String, nullable=True)
+    commit_hash = Column(String, nullable=True)
     
     created_at = Column(DateTime, default=func.now())
     updated_at = Column(DateTime, default=func.now(), onupdate=func.now())

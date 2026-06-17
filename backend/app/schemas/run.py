@@ -46,6 +46,8 @@ class AgentRunResponse(BaseModel):
     actual_provider: Optional[str] = None
     fallback_provider: Optional[str] = None
     fallback_reason: Optional[str] = None
+    code_diff: Optional[str] = None
+    commit_hash: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     logs: List[AgentLogResponse] = []
