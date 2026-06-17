@@ -51,3 +51,6 @@ def read_root():
         "service": settings.PROJECT_NAME,
         "version": "1.0.0"
     }
+
+# Reload trigger comment to force uvicorn reload on windows
+

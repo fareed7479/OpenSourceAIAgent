@@ -427,9 +427,11 @@ class CodingAgent(AgentNode):
                     f.write(content)
                 applied_files.append(rel_path)
                 
-        # Generate and store diff in state
+        # Generate and store diff in state and run
         diff_str = WorkspaceManager.get_diff(repo.id)
         state.diff = diff_str
+        run.code_diff = diff_str
+        db.commit()
         
         self._log_stage(db, state.run_id, f"Coding agent successfully applied changes to {len(applied_files)} files.", {
             "applied_files": applied_files,
@@ -563,6 +565,9 @@ Return output strictly as a JSON object:
                 test_passed=False
             )
             db.add(iteration)
+            run = db.query(AgentRun).filter(AgentRun.id == state.run_id).first()
+            if run:
+                run.code_diff = iteration.code_diff
             db.commit()
             
             # Generate and store diff in state
@@ -736,6 +741,17 @@ class PRAgent(AgentNode):
         # Run commit and stage local files
         commit_success = WorkspaceManager.commit_changes(run.repository_id, pr_title)
         
+        if commit_success:
+            try:
+                repo_path = WorkspaceManager.get_repo_dir(run.repository_id)
+                import git
+                git_repo = git.Repo(repo_path)
+                run.commit_hash = git_repo.head.commit.hexsha
+                db.commit()
+                logger.info(f"Saved head commit hash for run {run.id}: {run.commit_hash}")
+            except Exception as e:
+                logger.error(f"Failed to retrieve/save commit hash: {e}")
+                
         return state, "learning_agent"
 
 
@@ -790,6 +806,15 @@ class MultiAgentOrchestrator:
             if not run:
                 logger.error(f"Run {run_id} not found.")
                 return
+
+            # Ensure we checkout the branch at the start of the workflow execution
+            if start_node == "issue_agent":
+                try:
+                    from app.services.workspace import WorkspaceManager
+                    WorkspaceManager.create_and_checkout_branch(run.repository_id, run.branch_name)
+                    logger.info(f"Checked out branch {run.branch_name} for repository {run.repository_id}")
+                except Exception as e:
+                    logger.error(f"Failed to checkout branch {run.branch_name}: {e}")
 
             # Load or create state
             state_record = db.query(AgentState).filter(

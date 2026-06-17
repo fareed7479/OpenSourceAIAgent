@@ -231,14 +231,18 @@ def get_run_diff(
     if not run:
         raise HTTPException(status_code=404, detail="Run not found.")
         
-    from app.services.workspace import WorkspaceManager
-    diff_content = ""
-    try:
-        diff_content = WorkspaceManager.get_diff(run.repository_id)
-    except Exception as e:
-        logger.error(f"Failed to get live git diff: {e}")
+    # Read persisted code_diff from AgentRun first
+    diff_content = run.code_diff or ""
+    
+    # Try live workspace diff if DB record is empty
+    if not diff_content:
+        from app.services.workspace import WorkspaceManager
+        try:
+            diff_content = WorkspaceManager.get_diff(run.repository_id)
+        except Exception as e:
+            logger.error(f"Failed to get live git diff: {e}")
         
-    # Fallback to stored implementation iteration diff if live diff is clean (e.g. committed)
+    # Fallback to stored implementation iteration diff if still clean (e.g. committed)
     if not diff_content:
         from app.models.extensions import ImplementationIteration
         latest_it = db.query(ImplementationIteration).filter(
@@ -264,12 +268,17 @@ def get_run_diff(
             elif line.startswith("-") and not line.startswith("---"):
                 lines_removed += 1
                 
+    # Add payload logging to verify contents as requested
+    logger.info(f"[/diff API] run_id={run_id} files_modified={len(files_modified)} lines_added={lines_added} lines_removed={lines_removed} commit_hash={run.commit_hash}")
+                
     return {
         "run_id": run_id,
         "diff": diff_content,
         "files_modified": files_modified,
         "lines_added": lines_added,
-        "lines_removed": lines_removed
+        "lines_removed": lines_removed,
+        "commit_hash": run.commit_hash,
+        "branch_name": run.branch_name
     }
 
 @router.get("/{run_id}/context-metrics")

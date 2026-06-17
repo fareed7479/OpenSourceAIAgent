@@ -17,7 +17,9 @@ import {
   ExternalLink,
   AlertTriangle,
   Cpu,
-  RefreshCw
+  RefreshCw,
+  ChevronDown,
+  ChevronRight
 } from "lucide-react";
 import { api } from "../api/client";
 
@@ -142,6 +144,7 @@ export const AgentMonitor: React.FC = () => {
   const [loadingContextMetrics, setLoadingContextMetrics] = useState(false);
 
   const [logFilter, setLogFilter] = useState<string>("all");
+  const [collapsedFiles, setCollapsedFiles] = useState<Record<string, boolean>>({});
 
   const fetchRuns = async () => {
     try {
@@ -339,6 +342,39 @@ export const AgentMonitor: React.FC = () => {
     : selectedRun?.status === "failed"
     ? "Failed Execution"
     : "Initializing Workspace";
+
+  interface FileDiff {
+    filename: string;
+    lines: string[];
+  }
+
+  const parsePatch = (patch: string | null | undefined): FileDiff[] => {
+    if (!patch) return [];
+    const diffs: FileDiff[] = [];
+    const lines = patch.split("\n");
+    let currentFile: FileDiff | null = null;
+    for (const line of lines) {
+      if (line.startsWith("diff --git")) {
+        const parts = line.split(" ");
+        let filename = "Unknown File";
+        if (parts.length >= 4) {
+          filename = parts[3].replace("b/", "");
+        }
+        currentFile = { filename, lines: [line] };
+        diffs.push(currentFile);
+      } else {
+        if (currentFile) {
+          currentFile.lines.push(line);
+        } else if (line.trim() !== "") {
+          currentFile = { filename: "General Info", lines: [line] };
+          diffs.push(currentFile);
+        }
+      }
+    }
+    return diffs;
+  };
+
+  const fileDiffs = parsePatch(diffData?.diff);
 
   return (
     <div className="space-y-8 animate-fade-in max-w-none">
@@ -858,7 +894,7 @@ export const AgentMonitor: React.FC = () => {
                   ) : diffData && (diffData.diff || diffData.files_modified?.length > 0) ? (
                     <div className="space-y-5 flex-1 flex flex-col">
                       {/* Metric widgets */}
-                      <div className="grid grid-cols-3 gap-4">
+                      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                         <div className="p-4 bg-gray-950/60 border border-gray-850 rounded-xl space-y-1">
                           <span className="text-[10px] text-gray-500 uppercase font-bold block">Files Modified</span>
                           <span className="text-xl font-extrabold text-indigo-400">
@@ -877,6 +913,31 @@ export const AgentMonitor: React.FC = () => {
                             -{diffData.lines_removed || 0}
                           </span>
                         </div>
+                        <div className="p-4 bg-gray-950/60 border border-gray-850 rounded-xl space-y-1 col-span-2 md:col-span-1">
+                          <span className="text-[10px] text-gray-500 uppercase font-bold block">Branch</span>
+                          <span className="text-xs font-semibold text-gray-300 truncate block font-mono" title={diffData.branch_name}>
+                            {diffData.branch_name || "N/A"}
+                          </span>
+                        </div>
+                        <div className="p-4 bg-gray-950/60 border border-gray-850 rounded-xl space-y-1 col-span-2 md:col-span-1">
+                          <span className="text-[10px] text-gray-500 uppercase font-bold block">Commit SHA</span>
+                          <div className="flex items-center justify-between gap-1.5">
+                            <span className="text-xs font-semibold text-indigo-300 font-mono truncate block" title={diffData.commit_hash}>
+                              {diffData.commit_hash ? diffData.commit_hash.substring(0, 8) : "Pending Commit"}
+                            </span>
+                            {diffData.commit_hash && (
+                              <button 
+                                onClick={() => {
+                                  navigator.clipboard.writeText(diffData.commit_hash);
+                                }}
+                                className="text-gray-500 hover:text-white transition-colors"
+                                title="Copy full SHA"
+                              >
+                                <Copy className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
                       </div>
 
                       {/* File names list */}
@@ -894,24 +955,59 @@ export const AgentMonitor: React.FC = () => {
                       )}
 
                       {/* Patch Preview */}
-                      {diffData.diff && (
-                        <div className="flex-1 space-y-1.5">
-                          <span className="text-gray-500 font-bold uppercase text-[10px] tracking-wider block">Patch Preview</span>
-                          <div className="bg-[#02050e]/95 border border-gray-900 rounded-xl p-4 font-mono text-[10px] leading-relaxed max-h-[350px] overflow-y-auto text-gray-300 scrollbar-thin">
-                            {diffData.diff.split("\n").map((line: string, idx: number) => {
-                              let style = "text-gray-400";
-                              if (line.startsWith("+") && !line.startsWith("+++")) {
-                                style = "text-emerald-400 bg-emerald-950/10 px-1 border-l-2 border-emerald-500";
-                              } else if (line.startsWith("-") && !line.startsWith("---")) {
-                                style = "text-red-400 bg-red-950/10 px-1 border-l-2 border-red-500";
-                              } else if (line.startsWith("@@")) {
-                                style = "text-cyan-400 bg-cyan-950/10 font-bold";
-                              } else if (line.startsWith("diff --git")) {
-                                style = "text-indigo-400 font-bold border-b border-gray-900 pb-1 mt-2";
-                              }
+                      {fileDiffs.length > 0 && (
+                        <div className="flex-1 space-y-3">
+                          <span className="text-gray-500 font-bold uppercase text-[10px] tracking-wider block">Patch Preview (Collapsible)</span>
+                          <div className="space-y-3.5">
+                            {fileDiffs.map((fileDiff, fIdx) => {
+                              const isCollapsed = !!collapsedFiles[fileDiff.filename];
                               return (
-                                <div key={idx} className={`whitespace-pre ${style}`}>
-                                  {line || " "}
+                                <div key={fIdx} className="border border-gray-900 rounded-xl overflow-hidden bg-black/30">
+                                  <button 
+                                    type="button"
+                                    onClick={() => {
+                                      setCollapsedFiles(prev => ({
+                                        ...prev,
+                                        [fileDiff.filename]: !prev[fileDiff.filename]
+                                      }));
+                                    }}
+                                    className="w-full flex items-center justify-between p-3 bg-gray-950/70 hover:bg-gray-900/40 transition-colors text-left"
+                                  >
+                                    <div className="flex items-center gap-2">
+                                      {isCollapsed ? (
+                                        <ChevronRight className="w-3.5 h-3.5 text-gray-400" />
+                                      ) : (
+                                        <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
+                                      )}
+                                      <span className="font-mono text-xs font-bold text-gray-200">{fileDiff.filename}</span>
+                                    </div>
+                                    <div className="flex items-center gap-2 font-mono text-[9px] font-bold">
+                                      <span className="text-emerald-400">+{fileDiff.lines.filter(l => l.startsWith("+") && !l.startsWith("+++")).length}</span>
+                                      <span className="text-gray-650">/</span>
+                                      <span className="text-red-400">-{fileDiff.lines.filter(l => l.startsWith("-") && !l.startsWith("---")).length}</span>
+                                    </div>
+                                  </button>
+                                  {!isCollapsed && (
+                                    <div className="p-4 font-mono text-[10px] leading-relaxed max-h-[300px] overflow-y-auto text-gray-300 scrollbar-thin whitespace-pre overflow-x-auto bg-[#02050e]/95">
+                                      {fileDiff.lines.map((line: string, idx: number) => {
+                                        let style = "text-gray-400";
+                                        if (line.startsWith("+") && !line.startsWith("+++")) {
+                                          style = "text-emerald-400 bg-emerald-950/10 px-1 border-l-2 border-emerald-500";
+                                        } else if (line.startsWith("-") && !line.startsWith("---")) {
+                                          style = "text-red-400 bg-red-950/10 px-1 border-l-2 border-red-500";
+                                        } else if (line.startsWith("@@")) {
+                                          style = "text-cyan-400 bg-cyan-950/10 font-bold";
+                                        } else if (line.startsWith("diff --git")) {
+                                          style = "text-indigo-400 font-bold border-b border-gray-900 pb-1";
+                                        }
+                                        return (
+                                          <div key={idx} className={`whitespace-pre ${style}`}>
+                                            {line || " "}
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
                                 </div>
                               );
                             })}
