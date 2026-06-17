@@ -30,7 +30,7 @@ def scan_and_index_repository(repo_id: str, workspace_path: str) -> None:
     vector_store = get_vector_store()
     
     exclude_dirs = {".git", "node_modules", "venv", ".venv", "build", "target", "dist", "__pycache__", ".gemini"}
-    include_extensions = {".py", ".js", ".ts", ".tsx", ".go", ".java", ".rs"}
+    include_extensions = {".py", ".js", ".ts", ".tsx", ".go", ".java", ".rs", ".css", ".scss", ".html", ".vue", ".svelte", ".jsx"}
     
     # 1. Clear old indexes for this repository
     try:

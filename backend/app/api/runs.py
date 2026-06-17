@@ -271,3 +271,23 @@ def get_run_diff(
         "lines_added": lines_added,
         "lines_removed": lines_removed
     }
+
+@router.get("/{run_id}/context-metrics")
+def get_context_metrics(
+    run_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Retrieve semantic context retrieval quality metrics for a run."""
+    from app.models.logs import AgentLog
+    log = db.query(AgentLog).filter(
+        AgentLog.agent_run_id == run_id,
+        AgentLog.stage == "context",
+        AgentLog.message.like("%Context retrieval finished%")
+    ).first()
+    
+    if log and log.data and "retrieval_details" in log.data:
+        return log.data["retrieval_details"]
+        
+    return []
+

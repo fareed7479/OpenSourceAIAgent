@@ -1,18 +1,9 @@
-- `[x]` Database & Model Upgrades
-    - `[x]` Add `source_owner` and `source_repo` columns to `Issue` model in `issue.py`
-    - `[x]` Add `comment_url`, `issue_url`, and `repository_url` columns to `Assignment` model in `assignment.py`
-    - `[x]` Update automated migrations in `init_db.py` to add these new columns
-- `[x]` Backend Schema & Routes
-    - `[x]` Update schemas `IssueResponse` and `AssignmentResponse` in `schemas/issue.py` and `schemas/assignment.py`
-    - `[x]` Capture `source_owner` and `source_repo` during sync in `discovery.py`
-    - `[x]` Implement configurable comment templates with settings fallback in `assignment.py`
-    - `[x]` Resolve 404 error by targeting upstream/source owner/repo for commenting in `assignment.py`
-    - `[x]` Map comment URL and redirect status transitions (`comment_posted`, `assigned`, `rejected`) in `assignment.py`
-- `[x]` Frontend UI Enhancements
-    - `[x]` Update state badges in `Assignments.tsx`
-    - `[x]` Add request comment links and target repository links to cards in `Assignments.tsx`
-- `[x]` Testing & Verification
-    - `[x]` Write and run Phase 4 automated test suite `test_phase4.py`
-    - `[x]` Perform real validation by requesting assignment on a synced upstream issue
-- `[x]` Documentation
-    - `[x]` Compile and commit Phase 4 Completion Report
+- `[x]` Phase 5.5 Observability Cockpit
+  - `[x]` Backend Schema: Add repository and issue summaries to AgentRunResponse
+  - `[x]` Backend Provider Transparency: Update coding providers to return metadata
+  - `[x]` Backend Orchestration: Save provider metadata in run record on CodingAgent completion
+  - `[x]` Backend Context Agent: Query 10 semantic docs, build retrieval details, load top 4, log details
+  - `[x]` Backend Indexing: Add CSS, SCSS, HTML, Vue, Svelte, JSX extensions to code search indexer
+  - `[x]` Backend API: Create GET /runs/{run_id}/context-metrics endpoint
+  - `[x]` Frontend Redesign: Upgrade AgentMonitor.tsx with Execution Details, Provider Details, and Context Quality panels
+  - `[x]` E2E Validation: Rerun real issue, check cockpit live, write Phase 5.5 completion report

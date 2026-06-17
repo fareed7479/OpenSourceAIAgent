@@ -303,37 +303,64 @@ class ContextAgent(AgentNode):
         
         logger.info(f"Running semantic code search query: '{issue.title}'...")
         self._log_stage(db, state.run_id, f"Initiating semantic code search for query: '{issue.title}'")
-        # Search the vector database index (SQLite default)
-        search_results = query_semantic_code_search(repo.id, issue.title + " " + (issue.description or ""), limit=4)
+        # Search the vector database index (SQLite default) - retrieving 10 docs for audit quality metrics
+        search_results = query_semantic_code_search(repo.id, issue.title + " " + (issue.description or ""), limit=10)
         
         state.relevant_files = []
         state.file_contents = {}
+        retrieval_details = []
         
         repo_path = WorkspaceManager.get_repo_dir(repo.id)
-        for doc in search_results:
+        for idx, doc in enumerate(search_results):
             filepath = doc["filepath"]
-            state.relevant_files.append(filepath)
+            score = doc.get("similarity", 0.0)
             
-            # Read file contents
-            abs_path = os.path.join(repo_path, filepath)
-            if os.path.exists(abs_path):
-                with open(abs_path, "r", encoding="utf-8", errors="ignore") as f:
-                    state.file_contents[filepath] = f.read(40000)
+            # Formulate selection reasoning
+            if idx < 4:
+                reason = "Highly relevant semantic match; loaded into agent context window."
+            else:
+                reason = "Relevant semantic match; omitted from context window to optimize size."
+                
+            if filepath.endswith((".css", ".scss")):
+                reason += " (CSS styling file relevant for UI styles)"
+            elif filepath.endswith((".html", ".jsx", ".tsx", ".vue", ".svelte")):
+                reason += " (Markup/Component structure file)"
+                
+            retrieval_details.append({
+                "filepath": filepath,
+                "score": round(score, 4) if isinstance(score, float) else score,
+                "reason": reason
+            })
+            
+            # Read and load top 4 files into state
+            if idx < 4:
+                state.relevant_files.append(filepath)
+                abs_path = os.path.join(repo_path, filepath)
+                if os.path.exists(abs_path):
+                    with open(abs_path, "r", encoding="utf-8", errors="ignore") as f:
+                        state.file_contents[filepath] = f.read(40000)
                     
         # If no semantic matches, search standard paths (main.py, security.py)
         if not state.relevant_files:
-            self._log_stage(db, state.run_id, "No semantic search matches. Falling back to default files (main.py, auth.py, security.py).")
+            self._log_stage(db, state.run_id, "No semantic search matches. Falling back to default files (main.py, auth.py, security.py, App.tsx).")
             # Fallback to main.py
             for root, dirs, files in os.walk(repo_path):
                 for file in files:
-                    if file in ["security.py", "auth.py", "main.py", "App.tsx"]:
+                    if file in ["security.py", "auth.py", "main.py", "App.tsx", "index.html", "index.css"]:
                         rel = os.path.relpath(os.path.join(root, file), repo_path)
-                        state.relevant_files.append(rel)
-                        with open(os.path.join(root, file), "r", encoding="utf-8") as f:
-                            state.file_contents[rel] = f.read(40000)
+                        if rel not in state.relevant_files:
+                            state.relevant_files.append(rel)
+                            with open(os.path.join(root, file), "r", encoding="utf-8", errors="ignore") as f:
+                                state.file_contents[rel] = f.read(40000)
+                            retrieval_details.append({
+                                "filepath": rel,
+                                "score": 1.0,
+                                "reason": "Standard fallback entry point file"
+                            })
                             
         self._log_stage(db, state.run_id, f"Context retrieval finished. Gathered context from {len(state.relevant_files)} files.", {
-            "relevant_files": state.relevant_files
+            "relevant_files": state.relevant_files,
+            "retrieval_details": retrieval_details
         })
         return state, "coding_agent"
 
@@ -373,6 +400,16 @@ class CodingAgent(AgentNode):
             contribution_rules=repo.contribution_rules or "",
             workspace_path=repo_path
         )
+        
+        # Save provider transparency details to run record
+        metadata = result.get("provider_metadata", {})
+        if metadata:
+            run.actual_provider = metadata.get("actual_provider")
+            run.fallback_provider = metadata.get("fallback_provider")
+            run.fallback_reason = metadata.get("fallback_reason")
+            db.commit()
+            db.refresh(run)
+            logger.info(f"Saved provider transparency metadata: requested={provider}, actual={run.actual_provider}, fallback_reason={run.fallback_reason}")
         
         state.proposed_changes = result.get("changes", [])
         

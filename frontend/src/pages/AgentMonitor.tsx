@@ -71,8 +71,23 @@ interface AgentRun {
   branch_name: string;
   provider: string;
   status: string;
+  actual_provider?: string;
+  fallback_provider?: string;
+  fallback_reason?: string;
   created_at: string;
   updated_at: string;
+  repository?: {
+    id: string;
+    name: string;
+    owner: string;
+    url: string;
+  };
+  issue?: {
+    id: string;
+    number: number;
+    title: string;
+    url: string;
+  };
   logs: Array<{
     id: string;
     stage: string;
@@ -118,11 +133,13 @@ export const AgentMonitor: React.FC = () => {
 
   const [plan, setPlan] = useState<any | null>(null);
   const [diffData, setDiffData] = useState<any | null>(null);
-  const [activeTab, setActiveTab] = useState<"plan" | "logs" | "diff" | "healing" | "failure">("plan");
+  const [activeTab, setActiveTab] = useState<"plan" | "logs" | "diff" | "healing" | "failure" | "context-audit">("plan");
   const [feedbackText, setFeedbackText] = useState("");
   const [loadingPlan, setLoadingPlan] = useState(false);
   const [loadingDiff, setLoadingDiff] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [contextMetrics, setContextMetrics] = useState<any[]>([]);
+  const [loadingContextMetrics, setLoadingContextMetrics] = useState(false);
 
   const [logFilter, setLogFilter] = useState<string>("all");
 
@@ -203,15 +220,31 @@ export const AgentMonitor: React.FC = () => {
     }
   };
 
+  const fetchContextMetrics = async () => {
+    if (!selectedRunId) return;
+    setLoadingContextMetrics(true);
+    try {
+      const data = await api.get<any[]>(`/runs/${selectedRunId}/context-metrics`);
+      setContextMetrics(data);
+    } catch (err) {
+      console.error("Failed to load context metrics:", err);
+      setContextMetrics([]);
+    } finally {
+      setLoadingContextMetrics(false);
+    }
+  };
+
   useEffect(() => {
     fetchDetails();
     fetchPlan();
     fetchDiff();
+    fetchContextMetrics();
 
     const interval = setInterval(() => {
       fetchDetails();
       fetchPlan();
       fetchDiff();
+      fetchContextMetrics();
     }, 3000);
 
     return () => clearInterval(interval);
@@ -370,26 +403,65 @@ export const AgentMonitor: React.FC = () => {
           {/* LEFT COLUMN: Stage Timeline Tracker */}
           <div className="lg:col-span-1 space-y-6">
             
-            {/* Status Panel Card */}
+            {/* Status Panel Card - Execution cockpit details */}
             {selectedRun && (
-              <div className="glass-panel p-6 rounded-2xl border border-gray-800/80 space-y-4">
-                <h3 className="text-xs uppercase font-extrabold text-gray-500 tracking-wider">Run Information</h3>
+              <div className="glass-panel p-6 rounded-2xl border border-gray-850 space-y-5">
+                <h3 className="text-xs uppercase font-extrabold text-gray-500 tracking-wider pb-2 border-b border-gray-900">
+                  Execution Cockpit Details
+                </h3>
                 
-                <div className="space-y-3">
+                <div className="space-y-4 text-xs">
                   <div>
-                    <span className="text-[10px] text-gray-500 font-semibold block">Execution Status</span>
+                    <span className="text-[10px] text-gray-500 font-semibold block uppercase">Execution Status</span>
                     <span className={`inline-block text-xs font-bold px-2.5 py-1 rounded-md border uppercase mt-1 ${getStatusColor(selectedRun.status)}`}>
                       {selectedRun.status.replace(/_/g, " ")}
                     </span>
                   </div>
 
                   <div>
-                    <span className="text-[10px] text-gray-500 font-semibold block">Active Agent Node</span>
-                    <span className="text-sm font-bold text-white block mt-0.5">{activeAgentName}</span>
+                    <span className="text-[10px] text-gray-500 font-semibold block uppercase">Current Agent Node</span>
+                    <span className="text-sm font-bold text-white block mt-0.5 flex items-center gap-1.5">
+                      <Loader2 className="w-3.5 h-3.5 text-indigo-400 animate-spin" />
+                      {activeAgentName}
+                    </span>
                   </div>
 
                   <div>
-                    <span className="text-[10px] text-gray-500 font-semibold block">Target Branch</span>
+                    <span className="text-[10px] text-gray-500 font-semibold block uppercase">Target Workspace / Repo</span>
+                    <span className="text-white font-semibold block mt-0.5 truncate max-w-full">
+                      {selectedRun.repository ? `${selectedRun.repository.owner}/${selectedRun.repository.name}` : selectedRun.repository_id}
+                    </span>
+                    {selectedRun.repository?.url && (
+                      <a 
+                        href={selectedRun.repository.url} 
+                        target="_blank" 
+                        rel="noreferrer" 
+                        className="text-[10px] text-indigo-400 hover:underline flex items-center gap-0.5 mt-0.5"
+                      >
+                        Visit Repository <ExternalLink className="w-2 h-2" />
+                      </a>
+                    )}
+                  </div>
+
+                  <div>
+                    <span className="text-[10px] text-gray-500 font-semibold block uppercase">Target Issue</span>
+                    <span className="text-white font-semibold block mt-0.5 max-w-full truncate">
+                      {selectedRun.issue ? `#${selectedRun.issue.number} ${selectedRun.issue.title}` : `Issue ${selectedRun.issue_id}`}
+                    </span>
+                    {selectedRun.issue?.url && (
+                      <a 
+                        href={selectedRun.issue.url} 
+                        target="_blank" 
+                        rel="noreferrer" 
+                        className="text-[10px] text-indigo-400 hover:underline flex items-center gap-0.5 mt-0.5"
+                      >
+                        View Issue <ExternalLink className="w-2 h-2" />
+                      </a>
+                    )}
+                  </div>
+
+                  <div>
+                    <span className="text-[10px] text-gray-500 font-semibold block uppercase font-mono">Git Target Branch</span>
                     <div className="flex items-center gap-1.5 mt-1">
                       <span className="text-xs font-mono bg-black/40 border border-gray-900 px-2 py-1 rounded text-indigo-300 truncate max-w-[200px]">
                         {selectedRun.branch_name}
@@ -404,8 +476,41 @@ export const AgentMonitor: React.FC = () => {
                     </div>
                   </div>
 
+                  {/* Provider Transparency Details */}
+                  <div className="border-t border-gray-900 pt-4 space-y-2.5">
+                    <span className="text-[10px] text-gray-500 font-bold uppercase tracking-wider block">
+                      Provider Configuration
+                    </span>
+                    <div className="grid grid-cols-2 gap-3 bg-black/10 p-2.5 rounded-lg border border-gray-900/60">
+                      <div>
+                        <span className="text-[9px] text-gray-500 font-semibold block">Requested</span>
+                        <span className="font-bold text-gray-300">{selectedRun.provider}</span>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-gray-500 font-semibold block">Actual Provider</span>
+                        <span className="font-bold text-indigo-400">{selectedRun.actual_provider || "Pending execution"}</span>
+                      </div>
+                    </div>
+                    {selectedRun.fallback_provider && (
+                      <div className="bg-amber-950/20 border border-amber-500/10 text-[10px] p-2.5 rounded-lg text-amber-400 space-y-1">
+                        <div className="font-bold flex items-center gap-1">
+                          <AlertTriangle className="w-3 h-3 text-amber-500" />
+                          Provider Fallback Engaged
+                        </div>
+                        <p className="text-gray-400 leading-normal">
+                          Fallback: <span className="font-semibold text-gray-300">{selectedRun.fallback_provider}</span>
+                        </p>
+                        {selectedRun.fallback_reason && (
+                          <p className="text-[9px] text-gray-500 italic leading-snug">
+                            Reason: {selectedRun.fallback_reason}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
                   {selectedRun.pull_request && (
-                    <div className="border-t border-gray-900 pt-3 space-y-1.5">
+                    <div className="border-t border-gray-900 pt-4 space-y-1.5">
                       <span className="text-[10px] text-pink-400 font-bold uppercase tracking-wider flex items-center gap-1">
                         <GitPullRequest className="w-3.5 h-3.5" />
                         Pull Request Generated
@@ -564,6 +669,16 @@ export const AgentMonitor: React.FC = () => {
                 {selectedRun?.status === "failed" && (
                   <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
                 )}
+              </button>
+
+              <button
+                onClick={() => setActiveTab("context-audit")}
+                className={`flex items-center gap-1.5 text-xs font-semibold py-2.5 px-4 rounded-lg transition-all ${
+                  activeTab === "context-audit" ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/10" : "text-gray-400 hover:text-white"
+                }`}
+              >
+                <FileCode className="w-3.5 h-3.5" />
+                Context Quality
               </button>
             </div>
 
@@ -889,6 +1004,64 @@ export const AgentMonitor: React.FC = () => {
                       </div>
                     )}
                   </div>
+                </div>
+              )}
+
+              {/* TAB 6: Context Retrieval Quality Audit */}
+              {activeTab === "context-audit" && (
+                <div className="flex-1 flex flex-col h-full space-y-5">
+                  <div className="border-b border-gray-900 pb-3">
+                    <h3 className="font-bold text-white text-base">Semantic Context Quality Audit</h3>
+                    <p className="text-xs text-gray-400">
+                      Audit retrieved workspace files, similarity scores, and reasoning metadata.
+                    </p>
+                  </div>
+
+                  {loadingContextMetrics ? (
+                    <div className="flex justify-center items-center py-20 flex-1">
+                      <Loader2 className="w-8 h-8 text-indigo-500 animate-spin" />
+                    </div>
+                  ) : contextMetrics && contextMetrics.length > 0 ? (
+                    <div className="space-y-4 flex-1">
+                      <div className="border border-gray-900 rounded-xl overflow-hidden bg-black/20 text-xs">
+                        <table className="w-full text-left border-collapse">
+                          <thead>
+                            <tr className="bg-gray-950 border-b border-gray-900 text-[10px] text-gray-400 uppercase font-extrabold tracking-wider">
+                              <th className="py-3 px-4">Retrieved File Path</th>
+                              <th className="py-3 px-4 text-center">Similarity Score</th>
+                              <th className="py-3 px-4">Selection Reasoning & Intent Details</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-900">
+                            {contextMetrics.map((metric, idx) => (
+                              <tr key={idx} className="hover:bg-gray-900/10 transition">
+                                <td className="py-3 px-4 font-mono text-gray-200">{metric.filepath}</td>
+                                <td className="py-3 px-4 text-center">
+                                  <span className={`inline-block font-extrabold px-2 py-0.5 rounded ${
+                                    metric.score >= 0.75 
+                                      ? "text-emerald-400 bg-emerald-950/20" 
+                                      : metric.score >= 0.5 
+                                      ? "text-blue-400 bg-blue-950/20" 
+                                      : "text-gray-400 bg-gray-900"
+                                  }`}>
+                                    {(metric.score * 100).toFixed(2)}%
+                                  </span>
+                                </td>
+                                <td className="py-3 px-4 text-gray-300 leading-normal">{metric.reason}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <p className="text-[10px] text-gray-500 leading-relaxed italic">
+                        * Note: Only the top 4 highly relevant files are injected into the agent context window to minimize model context bloat and ensure optimal code generation.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="text-center py-20 text-gray-500 text-xs italic flex-1 flex items-center justify-center">
+                      No semantic search audit data is available. This panel populates during the Context Retrieval Stage.
+                    </div>
+                  )}
                 </div>
               )}
 

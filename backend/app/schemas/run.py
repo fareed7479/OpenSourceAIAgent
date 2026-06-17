@@ -17,6 +17,24 @@ class AgentRunCreate(BaseModel):
     issue_id: str
     provider: str  # gemini, claude, etc.
 
+class RepositorySummary(BaseModel):
+    id: str
+    name: str
+    owner: str
+    url: str
+
+    class Config:
+        from_attributes = True
+
+class IssueSummary(BaseModel):
+    id: str
+    number: int
+    title: str
+    url: str
+
+    class Config:
+        from_attributes = True
+
 class AgentRunResponse(BaseModel):
     id: str
     repository_id: str
@@ -32,6 +50,9 @@ class AgentRunResponse(BaseModel):
     updated_at: datetime
     logs: List[AgentLogResponse] = []
     pull_request: Optional[PullRequestResponse] = None
+    repository: Optional[RepositorySummary] = None
+    issue: Optional[IssueSummary] = None
 
     class Config:
         from_attributes = True
+

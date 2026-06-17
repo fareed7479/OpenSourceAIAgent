@@ -229,7 +229,7 @@ class ClaudeCodeCodingAgent(BaseCodingAgent):
         workspace_path: str
     ) -> Dict[str, Any]:
         logger.info(f"Invoking Claude Code CLI wrapper in workspace: {workspace_path}")
-        # Run local 'claude' CLI command if installed
+        fallback_reason = None
         try:
             # claude -p "message instructions" --yes
             cmd = ["claude", "-p", f"Fix issue: {issue_title}. Description: {issue_desc[:400]}", "--yes"]
@@ -240,13 +240,26 @@ class ClaudeCodeCodingAgent(BaseCodingAgent):
             res = subprocess.run(cmd, cwd=workspace_path, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=180.0)
             if res.returncode == 0:
                 logger.info("Claude Code CLI executed successfully.")
-                return {"explanation": "Applied changes via Claude Code CLI.", "changes": []}
+                return {
+                    "explanation": "Applied changes via Claude Code CLI.",
+                    "changes": [],
+                    "provider_metadata": {
+                        "requested_provider": "claudecode",
+                        "actual_provider": "claudecode",
+                        "fallback_provider": None,
+                        "fallback_reason": None
+                    }
+                }
+            else:
+                fallback_reason = f"Claude Code CLI failed with exit code {res.returncode}"
         except Exception as e:
             logger.warning(f"Claude Code CLI execution skipped/failed: {e}")
+            fallback_reason = f"Claude Code CLI execution failed: {e}"
 
         # Fallback
+        logger.info("Claude Code falling back to default LLM engine backend...")
         fallback_agent = GeminiCodingAgent(api_key=settings.GEMINI_API_KEY)
-        return fallback_agent.generate_fix(
+        res = fallback_agent.generate_fix(
             issue_title=issue_title,
             issue_desc=issue_desc,
             file_tree=file_tree,
@@ -254,6 +267,13 @@ class ClaudeCodeCodingAgent(BaseCodingAgent):
             contribution_rules=contribution_rules,
             workspace_path=workspace_path
         )
+        res["provider_metadata"] = {
+            "requested_provider": "claudecode",
+            "actual_provider": "gemini",
+            "fallback_provider": "gemini",
+            "fallback_reason": fallback_reason or "Claude Code CLI execution failed."
+        }
+        return res
 
 
 class AiderCodingAgent(BaseCodingAgent):
@@ -271,6 +291,7 @@ class AiderCodingAgent(BaseCodingAgent):
         workspace_path: str
     ) -> Dict[str, Any]:
         logger.info(f"Invoking Aider Coding Agent in workspace: {workspace_path}")
+        fallback_reason = None
         try:
             # aider --message "fix description" --yes
             cmd = ["aider", "--message", f"Fix issue: {issue_title}\nDescription: {issue_desc}", "--yes"]
@@ -281,12 +302,24 @@ class AiderCodingAgent(BaseCodingAgent):
             res = subprocess.run(cmd, cwd=workspace_path, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=200.0)
             if res.returncode == 0:
                 logger.info("Aider executed successfully.")
-                return {"explanation": "Applied changes via Aider CLI.", "changes": []}
+                return {
+                    "explanation": "Applied changes via Aider CLI.",
+                    "changes": [],
+                    "provider_metadata": {
+                        "requested_provider": "aider",
+                        "actual_provider": "aider",
+                        "fallback_provider": None,
+                        "fallback_reason": None
+                    }
+                }
+            else:
+                fallback_reason = f"Aider CLI failed with exit code {res.returncode}"
         except Exception as e:
             logger.warning(f"Aider CLI execution skipped/failed: {e}")
+            fallback_reason = f"Aider CLI execution failed: {e}"
 
         fallback_agent = GeminiCodingAgent(api_key=settings.GEMINI_API_KEY)
-        return fallback_agent.generate_fix(
+        res = fallback_agent.generate_fix(
             issue_title=issue_title,
             issue_desc=issue_desc,
             file_tree=file_tree,
@@ -294,6 +327,13 @@ class AiderCodingAgent(BaseCodingAgent):
             contribution_rules=contribution_rules,
             workspace_path=workspace_path
         )
+        res["provider_metadata"] = {
+            "requested_provider": "aider",
+            "actual_provider": "gemini",
+            "fallback_provider": "gemini",
+            "fallback_reason": fallback_reason or "Aider CLI execution failed."
+        }
+        return res
 
 
 class GeminiCodingAgent(BaseCodingAgent):

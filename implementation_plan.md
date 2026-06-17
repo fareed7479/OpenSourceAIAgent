@@ -1,100 +1,81 @@
-# Implementation Plan - Phase 3 Audit, Debugging, and Production Completion
+# Implementation Plan - Phase 5.5 Observability Cockpit & Agent Monitoring
 
-This plan outlines the steps to audit, verify, debug, repair, and complete the Issue Discovery, Storage, Ranking, Filtering, and Dashboard workflows.
-
-## Problem Description
-
-1. **Missing Schema Fields**: The `Issue` database model is missing fields requested by the user: `author_username` (Author), `github_created_at` (Created Date), `github_updated_at` (Updated Date), `comments_count` (Comments Count), and `meta_info` (for flexible JSON metadata).
-2. **Incomplete Sync & Fork Redirection**:
-   - Issue tracker settings on forks are often disabled, redirecting to the parent/upstream repo. Currently, the sync fetches from the fork regardless, returning empty lists or failing.
-   - Assigned issues are ignored during sync instead of being stored with `assigned_to_other` status.
-3. **Missing Filters**: The frontend is missing selectors to filter by label and status (open/closed).
-4. **Missing Issue Details Modal**: The frontend lacks a details modal to view full descriptions, ranking reasoning breakdowns, author info, comment counts, and assignment controls.
-5. **Baseline Ranking Engine**: The ranking engine only uses description clarity and basic language match, missing signals like ELUSOC labels, comments counts, issue age, and assignment status.
+This implementation plan outlines the steps to audit, debug, repair, and complete all observability, agent monitoring, provider transparency, and real-time cockpit features for the autonomous coding workflow.
 
 ---
 
-## Proposed Changes
+## 🔍 1. Discovered Issues & Root Causes
 
-### Database & Schema Migration
+1. **Timeline State Synchronization Failure (Issue 1)**:
+   - *Root Cause*: The `/intelligence/run/{run_id}/timeline` API endpoint was crashing with a `500 NameError` because `ImplementationIteration`, `QualityMetric`, and `RepairAttempt` were not imported in `intelligence.py`. Since `Promise.all` in the frontend page rejected, the state variables `selectedRun` and `monitorData` were never set, leaving all timeline steps in "Pending" and all panels empty.
 
-#### [MODIFY] [issue.py](file:///d:/PROJECTS/OpenSource%20Agent%20Project/backend/app/models/issue.py)
-- Add columns:
-  - `author_username` (String, nullable=True)
-  - `github_created_at` (DateTime, nullable=True)
-  - `github_updated_at` (DateTime, nullable=True)
-  - `comments_count` (Integer, default=0)
-  - `meta_info` (JSON, nullable=True)
+2. **Empty Live Console & Code Diffs (Issues 2 & 3)**:
+   - *Root Cause*: Due to the aforementioned `Promise.all` crash, logs were never successfully fetched. Additionally, the `/runs/{run_id}/diff` API endpoint returned a 404 because the dev server was running stale code. After server restart, the API returns 200 OK.
 
-#### [MODIFY] [init_db.py](file:///d:/PROJECTS/OpenSource%20Agent%20Project/backend/app/db/init_db.py)
-- Implement an automated `run_migrations` function on database startup to check if the new columns exist on the `issues` table and run `ALTER TABLE issues ADD COLUMN ...` statements if they are missing.
+3. **Missing Provider Transparency (Issue 5)**:
+   - *Root Cause*: Although `AgentRun` has database columns for `actual_provider`, `fallback_provider`, and `fallback_reason`, the Orchestrator's `CodingAgent._run_logic` never extracted `provider_metadata` from the coding agents and never saved these details to the database. Coding providers (OpenHands, ClaudeCode, Aider) did not populate `provider_metadata` on fallback.
 
----
-
-### Backend Logic & Services
-
-#### [MODIFY] [issue.py](file:///d:/PROJECTS/OpenSource%20Agent%20Project/backend/app/schemas/issue.py)
-- Update `IssueResponse` to include the new fields: `author_username`, `github_created_at`, `github_updated_at`, `comments_count`, and `meta_info`.
-
-#### [MODIFY] [repositories.py](file:///d:/PROJECTS/OpenSource%20Agent%20Project/backend/app/api/repositories.py)
-- Fetch and store `"has_issues"` (boolean) and `"parent"` (dict) in the repository's `meta_info["github_metadata"]` upon registration and sync.
-
-#### [MODIFY] [discovery.py](file:///d:/PROJECTS/OpenSource%20Agent%20Project/backend/app/services/discovery.py)
-- Modify `discover_repository_issues_task`:
-  - Retrieve `has_issues` and `parent` from the repository metadata. If `has_issues` is False and it's a fork, redirect the issues API query to the parent/upstream repository.
-  - Set request param `"state": "all"` to fetch both open and closed issues.
-  - Do not discard assigned issues. Map their assignment status correctly.
-  - Parse and store: `author_username`, `github_created_at`, `github_updated_at`, `comments_count`, and `meta_info` for each issue.
-- Update `_seed_mock_issues` to seed mock issues with the new fields.
-
-#### [MODIFY] [ranking.py](file:///d:/PROJECTS/OpenSource%20Agent%20Project/backend/app/services/ranking.py)
-- Expand `evaluate_issue_difficulty_and_score` to incorporate:
-  - **ELUSOC / Bounty** labels (+20 points)
-  - **Beginner / Help Wanted** labels (+10 points)
-  - **Bug / Documentation / Enhancement** labels
-  - **Comments count** (+2 points per comment up to +10, penalty if > 20)
-  - **Issue age** (+10 if < 30 days, -10 if > 180 days)
-  - **Assignment status** (reduction of 50 points if assigned to other/in progress)
-
-#### [MODIFY] [issues.py](file:///d:/PROJECTS/OpenSource%20Agent%20Project/backend/app/api/issues.py)
-- Update `list_issues` route:
-  - Add `state: Optional[str] = Query(None)` to support filtering by state (`open`, `closed`, `all`). Default to `open` if omitted.
-  - Add `label: Optional[str] = Query(None)` to support filtering by label.
+4. **Incomplete Context Retrieval Audit (Issue 7)**:
+   - *Root Cause*: Codebase indexing in `intelligence.py` restricted extensions to `{".py", ".js", ".ts", ".tsx", ".go", ".java", ".rs"}`. Crucially, `.css`, `.scss`, `.html`, `.vue`, `.svelte`, and `.jsx` were completely omitted from indexing. Thus, styling or layout tasks (e.g. CSS files) were never semantically matched. Furthermore, no retrieval metrics (scores/reasons) were generated or exposed via API.
 
 ---
 
-### Frontend Enhancements
+## 🛠️ 2. Proposed Changes
 
-#### [MODIFY] [Issues.tsx](file:///d:/PROJECTS/OpenSource%20Agent%20Project/frontend/src/pages/Issues.tsx)
-- Add UI controls:
-  - **Label dropdown/input** to filter issues by labels.
-  - **State selector tab/dropdown** to filter by Open, Closed, or All.
-- Update issue lists to display comments count, author username, and GitHub updated date.
-- Implement a modal dialog for **Issue Details**:
-  - Displays title, description (scrollable), labels, author, comments, parent repository, and assignment status.
-  - Renders a visual breakdown of the **AI Suitability Score** with ranking reasoning.
-  - Provides assignment controls ("Request Assignment") from inside the modal.
+### Backend Components
+
+#### [MODIFY] [schemas/run.py](file:///d:/PROJECTS/OpenSource%20Agent%20Project/backend/app/schemas/run.py)
+- Define `RepositorySummary` and `IssueSummary` Pydantic models.
+- Add `repository` and `issue` as nested optional models in `AgentRunResponse` to provide complete workspace/issue information to the cockpit.
+
+#### [MODIFY] [services/agent_provider.py](file:///d:/PROJECTS/OpenSource%20Agent%20Project/backend/app/services/agent_provider.py)
+- Update `OpenHandsCodingAgent`, `ClaudeCodeCodingAgent`, and `AiderCodingAgent` to correctly structure and return `provider_metadata` on success and LLM fallback execution, ensuring requested provider, actual provider, fallback provider, and fallback reason are fully tracked.
+
+#### [MODIFY] [services/agent_orchestrator.py](file:///d:/PROJECTS/OpenSource%20Agent%20Project/backend/app/services/agent_orchestrator.py)
+- **CodingAgent**: Extract `provider_metadata` from the coding agent return dictionary. Write `actual_provider`, `fallback_provider`, and `fallback_reason` to the `AgentRun` record and commit changes.
+- **ContextAgent**:
+  - Increase semantic search query limit to 10.
+  - Calculate `retrieval_details` (filepath, cosine similarity score, and selection reason).
+  - Load only the top 4 files into the agent context window to optimize size.
+  - Save `retrieval_details` inside the `AgentLog` log data.
+  - In the fallback logic, add default files to the `retrieval_details` map with a score of `1.0`.
+
+#### [MODIFY] [services/intelligence.py](file:///d:/PROJECTS/OpenSource%20Agent%20Project/backend/app/services/intelligence.py)
+- Add `.css`, `.scss`, `.html`, `.vue`, `.svelte`, and `.jsx` to the indexed file extensions set in `scan_and_index_repository`.
+
+#### [MODIFY] [api/runs.py](file:///d:/PROJECTS/OpenSource%20Agent%20Project/backend/app/api/runs.py)
+- Add a new route `GET /runs/{run_id}/context-metrics` that extracts the `retrieval_details` list from the context stage log and returns it.
 
 ---
 
-## Verification Plan
+### Frontend Components
+
+#### [MODIFY] [pages/AgentMonitor.tsx](file:///d:/PROJECTS/OpenSource%20Agent%20Project/frontend/src/pages/AgentMonitor.tsx)
+- Add a **Real-Time Execution Details Panel** displaying:
+  - Run Status, active agent name, target branch, and run duration.
+  - Workspace details: repository owner/name, associated issue URL/title.
+  - Provider transparency: Requested provider, actual provider, fallback provider, and fallback reason (with a warning badge if Gemini fallback occurred).
+- Add a **Context Retrieval Quality Panel** (rendered inside the right-hand panel or a dedicated tab):
+  - Displays a clean table of the Top 10 retrieved files.
+  - Shows similarity scores formatted as percentage matches.
+  - Renders the exact selection reasoning (e.g. "Loaded into context window", "CSS styling matches UI enhancement intent").
+- Refine dashboard UX styling with high-contrast, premium, dark-mode elements (harmonious colors, borders, and animations).
+
+---
+
+## 🔬 3. Verification Plan
 
 ### Automated Tests
-Create a new automated test file:
-#### [NEW] [test_phase3.py](file:///d:/PROJECTS/OpenSource%20Agent%20Project/backend/tests/test_phase3.py)
-Verify:
-1. Database migrations run and columns are created successfully.
-2. Fork redirection fetches from parent if issues tracker is disabled on fork.
-3. Ranking engine scores correctly according to comments count, age, and label signals.
-4. `/issues` endpoint filters correctly by state, label, search keywords, and repository.
-
-To run:
-```bash
-& "d:\PROJECTS\OpenSource Agent Project\venv\Scripts\python.exe" -m unittest tests.test_phase3
-```
+- Run the API test script to verify that `/runs/{run_id}` contains repository/issue summaries, and that `/runs/{run_id}/context-metrics` returns retrieval details:
+  ```powershell
+  & "d:\PROJECTS\OpenSource Agent Project\venv\Scripts\python.exe" C:\Users\User\.gemini\antigravity\brain\7afae6a6-5c7f-44d5-b931-958efb4cc502\scratch\test_apis.py
+  ```
 
 ### Manual Verification
-1. Log in, sync `fareed7479/College_Companion`.
-2. Verify that if issues tracker is disabled on the fork, the issues from parent are synced.
-3. Open Issues page. Try filters (State, Label, Repo, Search) and verify results.
-4. Click on an issue to open the details modal. Verify all details, score breakdown, and comments are visible.
+- Access the Agent Monitor frontend cockpit.
+- Trigger/select a run and verify:
+  1. Timeline stages update their states successfully.
+  2. Live console streams log output dynamically.
+  3. Diffs populate correctly with lines added/removed.
+  4. The Execution Details panel shows complete provider metadata and repository details.
+  5. The Context Retrieval Quality panel displays top files, scores, and selection reasons.
