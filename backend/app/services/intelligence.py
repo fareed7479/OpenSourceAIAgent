@@ -229,11 +229,113 @@ def get_text_embedding(text: str) -> List[float]:
     return np.random.randn(768).tolist()
 
 
+def _local_tfidf_search(repo_id: str, query: str, limit: int = 5) -> List[Dict[str, Any]]:
+    import math
+    from collections import Counter
+    db: Session = SessionLocal()
+    try:
+        from app.models.extensions import RepositoryEmbedding
+        records = db.query(RepositoryEmbedding).filter(
+            RepositoryEmbedding.repository_id == repo_id
+        ).all()
+        if not records:
+            return []
+            
+        def tokenize(text: str) -> List[str]:
+            return re.findall(r'[a-zA-Z0-9_]+', text.lower())
+            
+        query_tokens = tokenize(query)
+        if not query_tokens:
+            return []
+            
+        docs_tokens = [tokenize(rec.content) for rec in records]
+        
+        df = Counter()
+        for doc in docs_tokens:
+            unique_terms = set(doc)
+            for term in query_tokens:
+                if term in unique_terms:
+                    df[term] += 1
+                    
+        num_docs = len(records)
+        idf = {}
+        for term in query_tokens:
+            idf[term] = math.log((1 + num_docs) / (1 + df[term])) + 1.0
+            
+        query_tf = Counter(query_tokens)
+        query_vec = {}
+        query_norm_sq = 0.0
+        for term in query_tokens:
+            query_vec[term] = (query_tf[term] / len(query_tokens)) * idf[term]
+            query_norm_sq += query_vec[term] ** 2
+        query_norm = math.sqrt(query_norm_sq)
+        
+        if query_norm == 0:
+            return []
+            
+        results = []
+        for idx, rec in enumerate(records):
+            doc = docs_tokens[idx]
+            if not doc:
+                continue
+                
+            doc_tf = Counter(doc)
+            doc_vec = {}
+            doc_norm_sq = 0.0
+            
+            dot_product = 0.0
+            for term in query_tokens:
+                tf_val = doc_tf.get(term, 0) / len(doc)
+                doc_vec[term] = tf_val * idf[term]
+                dot_product += query_vec[term] * doc_vec[term]
+                
+            for term, val in doc_tf.items():
+                term_idf = idf.get(term, 1.0)
+                doc_norm_sq += (val / len(doc) * term_idf) ** 2
+            doc_norm = math.sqrt(doc_norm_sq)
+            
+            similarity = 0.0
+            if doc_norm > 0:
+                similarity = dot_product / (query_norm * doc_norm)
+                
+            similarity = max(0.0, min(1.0, similarity))
+            
+            results.append({
+                "filepath": rec.filepath,
+                "symbol": rec.symbol,
+                "content": rec.content,
+                "similarity": float(similarity)
+            })
+            
+        results.sort(key=lambda x: x["similarity"], reverse=True)
+        return results[:limit]
+        
+    except Exception as e:
+        logger.error(f"Error performing local TF-IDF fallback search: {e}")
+        return []
+    finally:
+        db.close()
+
+
 def query_semantic_code_search(repo_id: str, query: str, limit: int = 5) -> List[Dict[str, Any]]:
     """
     Embeds the user search query and executes similarity search against
     the indexed codebase vector blocks.
+    Falls back to high-fidelity local TF-IDF cosine similarity search if Gemini key fails.
     """
-    query_vector = get_text_embedding(query)
-    vector_store = get_vector_store()
-    return vector_store.search(repo_id, query_vector, limit)
+    global _gemini_api_working
+    if not _gemini_api_working or not settings.GEMINI_API_KEY:
+        logger.info("Using local high-fidelity TF-IDF fallback search engine.")
+        return _local_tfidf_search(repo_id, query, limit)
+        
+    try:
+        query_vector = get_text_embedding(query)
+        vector_store = get_vector_store()
+        results = vector_store.search(repo_id, query_vector, limit)
+        if results:
+            return results
+    except Exception as e:
+        logger.warning(f"Semantic vector search failed: {e}. Falling back to TF-IDF.")
+        
+    return _local_tfidf_search(repo_id, query, limit)
+
