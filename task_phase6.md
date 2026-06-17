@@ -1,0 +1,11 @@
+- `[ ]` Step 1: Database Migrations for `code_symbols` and `code_relations`
+- `[ ]` Step 2: AST Parser & Symbol Extraction module (`ast_parser.py`)
+- `[ ]` Step 3: Repository Knowledge Graph Traverse Service (`knowledge_graph.py`)
+- `[ ]` Step 4: High-Fidelity local TF-IDF Cosine Similarity Search fallback
+- `[ ]` Step 5: Test Discovery engine (`test_discovery.py`)
+- `[ ]` Step 6: Context Assembly Pipeline, Quality Scoring, & Token Budget (`context_pipeline.py`)
+- `[ ]` Step 7: Framework Profiling & Detection integration in `analyzer.py`
+- `[ ]` Step 8: Context quality scoring card integration in `AgentMonitor.tsx`
+- `[ ]` Step 9: API Endpoints for repository intelligence overview statistics
+- `[ ]` Step 10: UI Redesign of the Repository Intelligence Dashboard page (`Intelligence.tsx`)
+- `[ ]` Step 11: Real E2E Validation run & capture evidence
