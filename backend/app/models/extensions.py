@@ -190,3 +190,30 @@ class QualityMetric(Base):
     created_at = Column(DateTime, default=func.now())
     
     agent_run = relationship("AgentRun")
+
+
+class CodeSymbol(Base):
+    __tablename__ = "code_symbols"
+    
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    repository_id = Column(String, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False)
+    filepath = Column(String, nullable=False)
+    name = Column(String, nullable=False, index=True)
+    symbol_type = Column(String, nullable=False)  # class, function, method, interface, route, api_handler
+    start_line = Column(Integer, nullable=False)
+    end_line = Column(Integer, nullable=False)
+    
+    repository = relationship("Repository")
+
+
+class CodeRelation(Base):
+    __tablename__ = "code_relations"
+    
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    repository_id = Column(String, ForeignKey("repositories.id", ondelete="CASCADE"), nullable=False)
+    source_file = Column(String, nullable=False)
+    target_file = Column(String, nullable=False)
+    relation_type = Column(String, nullable=False)  # imports, depends_on, calls, extends
+    
+    repository = relationship("Repository")
+

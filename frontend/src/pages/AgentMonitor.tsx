@@ -139,8 +139,8 @@ export const AgentMonitor: React.FC = () => {
   const [feedbackText, setFeedbackText] = useState("");
   const [loadingPlan, setLoadingPlan] = useState(false);
   const [loadingDiff, setLoadingDiff] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [contextMetrics, setContextMetrics] = useState<any[]>([]);
+  const [contextIntel, setContextIntel] = useState<any>(null);
+  const contextMetrics = contextIntel?.retrieval_details || [];
   const [loadingContextMetrics, setLoadingContextMetrics] = useState(false);
 
   const [logFilter, setLogFilter] = useState<string>("all");
@@ -227,11 +227,11 @@ export const AgentMonitor: React.FC = () => {
     if (!selectedRunId) return;
     setLoadingContextMetrics(true);
     try {
-      const data = await api.get<any[]>(`/runs/${selectedRunId}/context-metrics`);
-      setContextMetrics(data);
+      const data = await api.get<any>(`/runs/${selectedRunId}/context-metrics`);
+      setContextIntel(data);
     } catch (err) {
       console.error("Failed to load context metrics:", err);
-      setContextMetrics([]);
+      setContextIntel(null);
     } finally {
       setLoadingContextMetrics(false);
     }
@@ -1170,6 +1170,68 @@ export const AgentMonitor: React.FC = () => {
                       Audit retrieved workspace files, similarity scores, and reasoning metadata.
                     </p>
                   </div>
+
+                  {!loadingContextMetrics && contextIntel?.quality_metrics && (
+                    <div className="bg-[#0b0f19]/80 border border-gray-800 p-5 rounded-2xl space-y-5 shadow-xl">
+                      <div className="flex justify-between items-center">
+                        <div>
+                          <h4 className="text-sm font-bold text-white">Context Quality Index</h4>
+                          <p className="text-[11px] text-gray-400">Measured coverage of the repository workspace before coding phase.</p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <span className="text-[10px] text-gray-500 uppercase tracking-widest font-extrabold">Overall Score</span>
+                          <span className={`text-2xl font-black px-3.5 py-1 rounded-xl font-mono border ${
+                            contextIntel.quality_metrics.overall_score >= 80 
+                              ? "text-emerald-400 bg-emerald-950/20 border-emerald-500/20" 
+                              : contextIntel.quality_metrics.overall_score >= 50
+                              ? "text-blue-400 bg-blue-950/20 border-blue-500/20"
+                              : "text-amber-400 bg-amber-950/20 border-amber-500/20"
+                          }`}>
+                            {contextIntel.quality_metrics.overall_score}/100
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Score breakdown metrics progress bars */}
+                      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                        {[
+                          { label: "Semantic Relevance", val: contextIntel.quality_metrics.semantic_relevance, max: 30, color: "from-indigo-500 to-indigo-600" },
+                          { label: "Dependency Graph", val: contextIntel.quality_metrics.dependency_coverage, max: 20, color: "from-purple-500 to-purple-600" },
+                          { label: "Test Coverage", val: contextIntel.quality_metrics.test_coverage, max: 20, color: "from-pink-500 to-pink-600" },
+                          { label: "Historical Fixes", val: contextIntel.quality_metrics.historical_coverage, max: 15, color: "from-emerald-500 to-emerald-600" },
+                          { label: "Architecture", val: contextIntel.quality_metrics.architecture_coverage, max: 15, color: "from-cyan-500 to-cyan-600" }
+                        ].map((metric, idx) => {
+                          const pct = (metric.val / metric.max) * 100;
+                          return (
+                            <div key={idx} className="bg-black/30 border border-gray-850/60 p-3.5 rounded-xl space-y-2">
+                              <div className="flex justify-between items-center text-[10px] font-bold text-gray-400">
+                                <span>{metric.label}</span>
+                                <span className="font-mono text-gray-300">{metric.val}/{metric.max}</span>
+                              </div>
+                              <div className="h-2 w-full bg-gray-950 rounded-full overflow-hidden">
+                                <div 
+                                  className={`h-full rounded-full bg-gradient-to-r ${metric.color} transition-all duration-500`}
+                                  style={{ width: `${pct}%` }}
+                                />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Framework and other details */}
+                      <div className="flex flex-wrap gap-4 text-xs pt-2 text-gray-400 border-t border-gray-850/50">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-gray-500">Framework Profile:</span>
+                          <span className="text-gray-300 bg-gray-900 px-2 py-0.5 rounded font-mono font-bold">{contextIntel.framework || "unknown"}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-gray-500">Historical Memories:</span>
+                          <span className="text-gray-300 bg-gray-900 px-2 py-0.5 rounded font-mono font-bold">{contextIntel.historical_fixes_count || 0} loaded</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
 
                   {loadingContextMetrics ? (
                     <div className="flex justify-center items-center py-20 flex-1">

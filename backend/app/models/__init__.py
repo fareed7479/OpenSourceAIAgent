@@ -21,7 +21,9 @@ from app.models.extensions import (
     WebhookEvent,
     CodeSearchIndex,
     ImplementationIteration,
-    QualityMetric
+    QualityMetric,
+    CodeSymbol,
+    CodeRelation
 )
 
 __all__ = [
@@ -47,5 +49,7 @@ __all__ = [
     "WebhookEvent",
     "CodeSearchIndex",
     "ImplementationIteration",
-    "QualityMetric"
+    "QualityMetric",
+    "CodeSymbol",
+    "CodeRelation"
 ]

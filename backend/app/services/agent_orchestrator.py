@@ -301,66 +301,32 @@ class ContextAgent(AgentNode):
         issue = run.issue
         repo = run.repository
         
-        logger.info(f"Running semantic code search query: '{issue.title}'...")
-        self._log_stage(db, state.run_id, f"Initiating semantic code search for query: '{issue.title}'")
-        # Search the vector database index (SQLite default) - retrieving 10 docs for audit quality metrics
-        search_results = query_semantic_code_search(repo.id, issue.title + " " + (issue.description or ""), limit=10)
+        logger.info(f"Running context assembly pipeline for issue: '{issue.title}'...")
+        self._log_stage(db, state.run_id, f"Assembling repository intelligence context for: '{issue.title}'")
         
-        state.relevant_files = []
-        state.file_contents = {}
-        retrieval_details = []
+        from app.services.context_pipeline import ContextAssemblyPipeline
         
-        repo_path = WorkspaceManager.get_repo_dir(repo.id)
-        for idx, doc in enumerate(search_results):
-            filepath = doc["filepath"]
-            score = doc.get("similarity", 0.0)
-            
-            # Formulate selection reasoning
-            if idx < 4:
-                reason = "Highly relevant semantic match; loaded into agent context window."
-            else:
-                reason = "Relevant semantic match; omitted from context window to optimize size."
-                
-            if filepath.endswith((".css", ".scss")):
-                reason += " (CSS styling file relevant for UI styles)"
-            elif filepath.endswith((".html", ".jsx", ".tsx", ".vue", ".svelte")):
-                reason += " (Markup/Component structure file)"
-                
-            retrieval_details.append({
-                "filepath": filepath,
-                "score": round(score, 4) if isinstance(score, float) else score,
-                "reason": reason
-            })
-            
-            # Read and load top 4 files into state
-            if idx < 4:
-                state.relevant_files.append(filepath)
-                abs_path = os.path.join(repo_path, filepath)
-                if os.path.exists(abs_path):
-                    with open(abs_path, "r", encoding="utf-8", errors="ignore") as f:
-                        state.file_contents[filepath] = f.read(40000)
-                    
-        # If no semantic matches, search standard paths (main.py, security.py)
-        if not state.relevant_files:
-            self._log_stage(db, state.run_id, "No semantic search matches. Falling back to default files (main.py, auth.py, security.py, App.tsx).")
-            # Fallback to main.py
-            for root, dirs, files in os.walk(repo_path):
-                for file in files:
-                    if file in ["security.py", "auth.py", "main.py", "App.tsx", "index.html", "index.css"]:
-                        rel = os.path.relpath(os.path.join(root, file), repo_path)
-                        if rel not in state.relevant_files:
-                            state.relevant_files.append(rel)
-                            with open(os.path.join(root, file), "r", encoding="utf-8", errors="ignore") as f:
-                                state.file_contents[rel] = f.read(40000)
-                            retrieval_details.append({
-                                "filepath": rel,
-                                "score": 1.0,
-                                "reason": "Standard fallback entry point file"
-                            })
-                            
+        context_package = ContextAssemblyPipeline.assemble_context_package(
+            db=db,
+            repo_id=repo.id,
+            issue_id=issue.id,
+            run_id=state.run_id
+        )
+        
+        state.relevant_files = context_package["relevant_files"]
+        state.file_contents = context_package["file_contents"]
+        state.framework = context_package["framework"]
+        state.quality_metrics = context_package["quality_metrics"]
+        state.historical_fixes = context_package["historical_fixes"]
+        state.readme_summary = context_package["readme_summary"]
+        retrieval_details = context_package["retrieval_details"]
+        
         self._log_stage(db, state.run_id, f"Context retrieval finished. Gathered context from {len(state.relevant_files)} files.", {
             "relevant_files": state.relevant_files,
-            "retrieval_details": retrieval_details
+            "retrieval_details": retrieval_details,
+            "quality_metrics": state.quality_metrics,
+            "framework": state.framework,
+            "historical_fixes_count": len(state.historical_fixes)
         })
         return state, "coding_agent"
 
@@ -390,11 +356,58 @@ class CodingAgent(AgentNode):
             for file in files:
                 file_tree.append(os.path.relpath(os.path.join(root, file), repo_path))
 
+        # Framework-specific instructions mapping
+        framework_instructions = {
+            "React": "Ensure components are functional, reusable, and styled following React hooks rules. Prefer Tailwind or CSS module conventions if present.",
+            "Next.js": "Follow Next.js file-system routing patterns and App Router conventions if directory structure matches. Ensure Server vs Client Component boundaries are respected.",
+            "Vue": "Build components as single-file components (.vue files) adhering to Vue 3 Composition API style guide conventions.",
+            "Angular": "Follow Angular styling and structural structure guidelines, including TypeScript decorators and dependency injection.",
+            "Spring Boot": "Follow standard enterprise Spring Boot architecture conventions, including proper MVC controller, service, repository layering, and clean annotations.",
+            "Express": "Design clean middleware handlers and router patterns. Ensure callbacks/promises are safely caught and error handling middleware is triggered.",
+            "FastAPI": "Use pydantic models for request/response serialization. Follow clean async/await patterns and Dependency Injection (Depends) conventions.",
+            "Django": "Follow MTV (Model-Template-View) patterns. Ensure all database accesses respect ORM models and django conventions.",
+            "Flask": "Write modular flask blueprints and clean views. Handle requests and responses using standard flask context.",
+            "Laravel": "Maintain proper Laravel architecture guidelines, using Eloquent ORM and PSR standards.",
+            "ASP.NET": "Use C# dependency injection, proper MVC patterns, and REST controller templates."
+        }
+
+        # Enrich issue description with Repository Intelligence context package (Step 11)
+        framework = getattr(state, "framework", None) or repo.framework or "unknown"
+        historical_fixes = getattr(state, "historical_fixes", [])
+        readme_summary = getattr(state, "readme_summary", "")
+        
+        from app.services.test_discovery import TestDiscoveryManager
+        test_files = TestDiscoveryManager.discover_related_tests(repo_path, state.relevant_files)
+        
+        enriched_desc = issue.description or ""
+        enriched_desc += "\n\n=================================================="
+        enriched_desc += "\n=== REPOSITORY INTELLIGENCE CONTEXT PACKAGE ==="
+        enriched_desc += "\n=================================================="
+        enriched_desc += f"\n- **Detected Framework**: {framework}"
+        
+        fw_instr = framework_instructions.get(framework, "Follow standard coding conventions for this language.")
+        enriched_desc += f"\n- **Framework-Specific Guidelines**: {fw_instr}"
+        
+        if test_files:
+            enriched_desc += f"\n- **Discovered Related Test Files**: {', '.join(test_files)}"
+        else:
+            enriched_desc += "\n- **Discovered Related Test Files**: None"
+            
+        if readme_summary:
+            enriched_desc += f"\n- **Repository Architecture Notes**:\n{readme_summary}"
+            
+        if historical_fixes:
+            enriched_desc += "\n- **Relevant Historical Fixes**:"
+            for idx, fix in enumerate(historical_fixes, 1):
+                enriched_desc += f"\n  {idx}. Past Issue #{fix.get('key')}: {fix.get('fix_summary')} (Relevance: {fix.get('relevance')})"
+        else:
+            enriched_desc += "\n- **Relevant Historical Fixes**: None"
+
         self._log_stage(db, state.run_id, f"Invoking coding provider agent '{provider}' to generate implementation changes.")
         # Generate fixes
         result = agent.generate_fix(
             issue_title=issue.title,
-            issue_desc=issue.description or "",
+            issue_desc=enriched_desc,
             file_tree=file_tree,
             relevant_files=state.file_contents,
             contribution_rules=repo.contribution_rules or "",

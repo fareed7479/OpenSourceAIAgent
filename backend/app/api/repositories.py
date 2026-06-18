@@ -415,3 +415,97 @@ def delete_repository(
     db.delete(repo)
     db.commit()
     return None
+
+@router.get("/{repo_id}/intelligence")
+def get_repository_intelligence(
+    repo_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Retrieve repository intelligence overview statistics, including:
+    - framework, language
+    - indexed files count, indexed symbols count
+    - knowledge graph nodes & edges
+    - historical fixes, tests discovered
+    - sync details, index status
+    """
+    repo = db.query(Repository).filter(
+        Repository.id == repo_id,
+        Repository.user_id == current_user.id
+    ).first()
+    
+    if not repo:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Repository not found."
+        )
+        
+    # Get stats from database
+    from app.models.extensions import CodeSymbol, CodeRelation, RepositoryMemory, RepositoryEmbedding
+    from app.services.workspace import WorkspaceManager
+    from app.services.test_discovery import TestDiscoveryManager
+    
+    # Files indexed count (approximate by unique filepaths in CodeSymbol)
+    indexed_files = db.query(CodeSymbol.filepath).filter(
+        CodeSymbol.repository_id == repo_id
+    ).distinct().count()
+    
+    # Symbols count
+    indexed_symbols = db.query(CodeSymbol).filter(
+        CodeSymbol.repository_id == repo_id
+    ).count()
+    
+    # Knowledge graph nodes (unique source/target files in CodeRelation + CodeSymbol)
+    kg_nodes_query = db.query(CodeRelation.source_file).filter(
+        CodeRelation.repository_id == repo_id
+    ).union(
+        db.query(CodeRelation.target_file).filter(
+            CodeRelation.repository_id == repo_id
+        )
+    )
+    kg_nodes = kg_nodes_query.distinct().count()
+    if kg_nodes == 0 and indexed_files > 0:
+        kg_nodes = indexed_files
+        
+    # Knowledge graph edges (total relations)
+    kg_edges = db.query(CodeRelation).filter(
+        CodeRelation.repository_id == repo_id
+    ).count()
+    
+    # Vector chunks (retrieve count from RepositoryEmbedding table)
+    vector_chunks = db.query(RepositoryEmbedding).filter(
+        RepositoryEmbedding.repository_id == repo_id
+    ).count()
+    
+    # Historical fixes (RepositoryMemory type past_fix)
+    historical_fixes = db.query(RepositoryMemory).filter(
+        RepositoryMemory.repository_id == repo_id,
+        RepositoryMemory.memory_type == "past_fix"
+    ).count()
+    
+    # Tests discovered
+    repo_path = WorkspaceManager.get_repo_dir(repo_id)
+    test_files = []
+    if os.path.exists(repo_path):
+        test_files = TestDiscoveryManager.get_all_test_files(repo_path)
+    test_files_count = len(test_files)
+    
+    # Dependency Count: count of unique relations
+    dependency_count = kg_edges
+    
+    return {
+        "framework": repo.framework or "unknown",
+        "language": repo.language or "unknown",
+        "dependency_count": dependency_count,
+        "indexed_files": indexed_files,
+        "indexed_symbols": indexed_symbols,
+        "vector_chunks": vector_chunks,
+        "kg_nodes": kg_nodes,
+        "kg_edges": kg_edges,
+        "historical_fixes": historical_fixes,
+        "tests_discovered": test_files_count,
+        "index_status": "synced" if indexed_symbols > 0 else "pending",
+        "last_sync": repo.updated_at.isoformat() if repo.updated_at else None
+    }
+

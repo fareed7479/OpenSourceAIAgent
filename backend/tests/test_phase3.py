@@ -31,13 +31,16 @@ def override_get_db():
     finally:
         db.close()
 
-app.dependency_overrides[get_db] = override_get_db
+# Override the get_db dependency inside setUpClass
 
 class TestPhase3(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         # 1. Create table structure
+        import importlib
+        importlib.import_module("app.models")
         Base.metadata.create_all(bind=test_engine)
+        app.dependency_overrides[get_db] = override_get_db
         
         # 2. Run migrations check
         with patch('app.db.init_db.engine', test_engine):
@@ -47,6 +50,8 @@ class TestPhase3(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        if get_db in app.dependency_overrides:
+            del app.dependency_overrides[get_db]
         Base.metadata.drop_all(bind=test_engine)
         if os.path.exists("./test_agent_platform_temp_p3.db"):
             try:

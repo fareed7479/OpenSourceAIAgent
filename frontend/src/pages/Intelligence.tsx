@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Loader2, Search, Brain, Code, FileCode, Sparkles } from "lucide-react";
+import { Loader2, Search, Brain, Code, FileCode, Sparkles, Cpu, Binary, Network, History, Workflow } from "lucide-react";
 import { api } from "../api/client";
 
 interface Repository {
@@ -48,6 +48,7 @@ export const Intelligence: React.FC = () => {
   // Intelligence states
   const [intelData, setIntelData] = useState<RepoIntelligenceData | null>(null);
   const [memories, setMemories] = useState<MemoryRecord[]>([]);
+  const [repoStats, setRepoStats] = useState<any | null>(null);
   const [loadingIntel, setLoadingIntel] = useState(false);
 
   // Search states
@@ -83,10 +84,14 @@ export const Intelligence: React.FC = () => {
 
       const memoryResp = await api.get<MemoryRecord[]>(`/intelligence/repo/${selectedRepo}/memory`);
       setMemories(memoryResp);
+
+      const statsResp = await api.get<any>(`/repositories/${selectedRepo}/intelligence`);
+      setRepoStats(statsResp);
     } catch (err) {
       console.error("Failed to load intelligence maps:", err);
       setIntelData(null);
       setMemories([]);
+      setRepoStats(null);
     } finally {
       setLoadingIntel(false);
     }
@@ -152,7 +157,57 @@ export const Intelligence: React.FC = () => {
           <Loader2 className="w-10 h-10 text-indigo-500 animate-spin" />
         </div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
+        <div className="space-y-8">
+          {/* Repository Health Overview Stats Panel */}
+          {repoStats && (
+            <div className="bg-[#0b0f19]/80 border border-gray-800 p-6 rounded-2xl shadow-2xl relative overflow-hidden space-y-6">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-gray-900 pb-4">
+                <div>
+                  <h2 className="text-lg font-black text-white flex items-center gap-2">
+                    <Workflow className="w-5 h-5 text-indigo-400 animate-pulse" />
+                    Repository Health & Intelligence Profile
+                  </h2>
+                  <p className="text-xs text-gray-400">Deep codebase metadata automatically scanned and extracted from AST parsing and vector embeddings.</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2 bg-emerald-950/20 text-emerald-400 border border-emerald-500/20 px-3 py-1 rounded-full text-xs font-bold">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    {repoStats.index_status || "synced"}
+                  </div>
+                  {repoStats.last_sync && (
+                    <span className="text-[10px] text-gray-500 font-mono">Synced {new Date(repoStats.last_sync).toLocaleString()}</span>
+                  )}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+                {[
+                  { label: "Framework Profile", val: repoStats.framework, desc: repoStats.language, icon: Cpu, color: "text-indigo-400 bg-indigo-950/30 border-indigo-500/10" },
+                  { label: "Indexed Files", val: repoStats.indexed_files, desc: "Source files analyzed", icon: FileCode, color: "text-blue-400 bg-blue-950/30 border-blue-500/10" },
+                  { label: "Extracted Symbols", val: repoStats.indexed_symbols, desc: "Functions, classes, models", icon: Code, color: "text-purple-400 bg-purple-950/30 border-purple-500/10" },
+                  { label: "Vector Chunks", val: repoStats.vector_chunks, desc: "Semantic segments", icon: Binary, color: "text-pink-400 bg-pink-950/30 border-pink-500/10" },
+                  { label: "Graph Relations", val: `${repoStats.kg_nodes} nodes • ${repoStats.kg_edges} edges`, desc: "Dependency graph size", icon: Network, color: "text-cyan-400 bg-cyan-950/30 border-cyan-500/10" },
+                  { label: "Tests & Fixes", val: `${repoStats.tests_discovered} tests • ${repoStats.historical_fixes} fixes`, desc: "Validation resources", icon: History, color: "text-emerald-400 bg-emerald-950/30 border-emerald-500/10" },
+                ].map((stat, idx) => {
+                  const Icon = stat.icon;
+                  return (
+                    <div key={idx} className={`p-4 rounded-xl border flex flex-col justify-between ${stat.color} transition duration-300 hover:scale-[1.02]`}>
+                      <div className="flex justify-between items-start mb-2">
+                        <span className="text-[9px] uppercase font-bold tracking-wider opacity-80">{stat.label}</span>
+                        <Icon className="w-4 h-4 opacity-70" />
+                      </div>
+                      <div>
+                        <h4 className="text-lg font-black tracking-tight text-white mb-0.5">{stat.val}</h4>
+                        <span className="text-[10px] opacity-60 block">{stat.desc}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 items-start">
           
           {/* Left Columns (Col Span 2): AST Symbol Mapping and Semantic Search */}
           <div className="lg:col-span-2 space-y-6">
@@ -289,6 +344,7 @@ export const Intelligence: React.FC = () => {
           </div>
 
         </div>
+      </div>
       )}
     </div>
   );
