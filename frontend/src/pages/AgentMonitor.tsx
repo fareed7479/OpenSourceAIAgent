@@ -108,6 +108,12 @@ interface AgentRun {
   } | null;
 }
 
+interface RetrievalDetail {
+  filepath: string;
+  score: number;
+  reason: string;
+}
+
 const ALL_STAGES = [
   { id: "issue_agent", name: "Issue Analysis" },
   { id: "assignment_agent", name: "Assignment Check" },
@@ -132,6 +138,7 @@ export const AgentMonitor: React.FC = () => {
   const [monitorData, setMonitorData] = useState<MonitorData | null>(null);
   const [loading, setLoading] = useState(true);
   const [fetchingDetails, setFetchingDetails] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   const [plan, setPlan] = useState<any | null>(null);
   const [diffData, setDiffData] = useState<any | null>(null);
@@ -1249,7 +1256,7 @@ export const AgentMonitor: React.FC = () => {
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-900">
-                            {contextMetrics.map((metric, idx) => (
+                            {contextMetrics.map((metric: RetrievalDetail, idx: number) => (
                               <tr key={idx} className="hover:bg-gray-900/10 transition">
                                 <td className="py-3 px-4 font-mono text-gray-200">{metric.filepath}</td>
                                 <td className="py-3 px-4 text-center">

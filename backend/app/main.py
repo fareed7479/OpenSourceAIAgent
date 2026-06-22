@@ -52,5 +52,5 @@ def read_root():
         "version": "1.0.0"
     }
 
-# Reload trigger comment to force uvicorn reload on windows
+# Reload trigger comment to force uvicorn reload on windows (refreshed 2026-06-22)
 

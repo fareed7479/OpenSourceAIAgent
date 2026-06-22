@@ -97,9 +97,9 @@ export const Assignments: React.FC = () => {
               <div className="space-y-3 flex-1">
                 <div className="flex items-center gap-2">
                   <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider ${
-                    assignment.status === "assigned" 
+                    assignment.status === "assigned" || assignment.status === "active" || assignment.status === "approved"
                       ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" 
-                      : assignment.status === "in_progress" 
+                      : assignment.status === "in_progress" || assignment.status === "monitoring"
                       ? "bg-indigo-500/10 text-indigo-400 border border-indigo-500/20" 
                       : assignment.status === "comment_posted" 
                       ? "bg-blue-500/10 text-blue-400 border border-blue-500/20" 
@@ -107,9 +107,9 @@ export const Assignments: React.FC = () => {
                       ? "bg-amber-500/10 text-amber-400 border border-amber-500/20"
                       : "bg-red-500/10 text-red-400 border border-red-500/20"
                   }`}>
-                    {assignment.status.replace(/_/g, " ")}
+                    {(assignment.status || "").replace(/_/g, " ")}
                   </span>
-                  <span className="text-[10px] text-gray-500">Requested: {new Date(assignment.created_at).toLocaleDateString()}</span>
+                  <span className="text-[10px] text-gray-500">Requested: {assignment.created_at ? new Date(assignment.created_at).toLocaleDateString() : "N/A"}</span>
                 </div>
                 
                 {assignment.issue && (
@@ -134,13 +134,13 @@ export const Assignments: React.FC = () => {
                           Request comment posted. Waiting for repository maintainers to assign this issue.
                         </span>
                       )}
-                      {assignment.status === "assigned" && (
+                      {(assignment.status === "assigned" || assignment.status === "active" || assignment.status === "approved") && (
                         <span className="flex items-center gap-1.5 text-emerald-400/80">
                           <CheckCircle className="w-3.5 h-3.5" />
                           Assigned successfully! Coding workspace is being initialized.
                         </span>
                       )}
-                      {assignment.status === "in_progress" && (
+                      {(assignment.status === "in_progress" || assignment.status === "monitoring") && (
                         <span className="flex items-center gap-1.5 text-indigo-400/80 font-semibold">
                           <CheckCircle className="w-3.5 h-3.5" />
                           Assigned successfully! Agent coding flow is currently running.
@@ -171,7 +171,11 @@ export const Assignments: React.FC = () => {
                 )}
               </div>
               
-              {(assignment.status === "assigned" || assignment.status === "in_progress") && (
+              {(assignment.status === "assigned" || 
+                assignment.status === "in_progress" || 
+                assignment.status === "active" || 
+                assignment.status === "approved" || 
+                assignment.status === "monitoring") && (
                 <div className="flex items-center">
                   <Link
                     to={`/agent-monitor?issueId=${assignment.issue_id}`}

@@ -295,8 +295,8 @@ def get_context_metrics(
         AgentLog.message.like("%Context retrieval finished%")
     ).first()
     
-    if log and log.data and "retrieval_details" in log.data:
-        return log.data["retrieval_details"]
+    if log and log.data:
+        return log.data
         
-    return []
+    return {}
 
