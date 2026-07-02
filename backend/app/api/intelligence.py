@@ -177,6 +177,68 @@ def get_repository_memory(
         } for m in memories
     ]
 
+from pydantic import BaseModel
+
+class MemoryCreate(BaseModel):
+    key: str
+    value: str
+    memory_type: str  # pattern, convention, preference, past_fix, etc.
+
+@router.post("/repo/{repo_id}/memory", status_code=status.HTTP_201_CREATED)
+def create_repository_memory(
+    repo_id: str,
+    payload: MemoryCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Add a custom repository convention, pattern, or preference manually."""
+    repo = db.query(Repository).filter(
+        Repository.id == repo_id,
+        Repository.user_id == current_user.id
+    ).first()
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found.")
+        
+    memory = RepositoryMemory(
+        repository_id=repo_id,
+        key=payload.key,
+        value=payload.value,
+        memory_type=payload.memory_type
+    )
+    db.add(memory)
+    db.commit()
+    db.refresh(memory)
+    return memory
+
+@router.get("/repo/{repo_id}/dependencies", status_code=status.HTTP_200_OK)
+def get_repository_dependencies(
+    repo_id: str,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Retrieve indexed codebase relations for dependency graph visualization."""
+    repo = db.query(Repository).filter(
+        Repository.id == repo_id,
+        Repository.user_id == current_user.id
+    ).first()
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found.")
+        
+    from app.models.extensions import CodeRelation
+    relations = db.query(CodeRelation).filter(
+        CodeRelation.repository_id == repo_id
+    ).all()
+    
+    return [
+        {
+            "id": r.id,
+            "source_file": r.source_file,
+            "target_file": r.target_file,
+            "relation_type": r.relation_type
+        } for r in relations
+    ]
+
+
 @router.get("/repo/{repo_id}/search", status_code=status.HTTP_200_OK)
 def perform_semantic_search(
     repo_id: str,

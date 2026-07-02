@@ -1,9 +1,98 @@
 import os
 import json
 import logging
-from typing import Dict, Any
+import re
+from typing import Dict, Any, List, Tuple
 
 logger = logging.getLogger(__name__)
+
+def get_directory_structure(clone_path: str, max_depth: int = 3) -> Dict[str, Any]:
+    """Generates a nested tree representing the directory structure of the repository."""
+    exclude_dirs = {".git", "node_modules", "venv", ".venv", "build", "target", "dist", "__pycache__", ".gemini"}
+    
+    def walk_tree(current_path: str, depth: int) -> Dict[str, Any]:
+        node_name = os.path.basename(current_path) or "root"
+        node = {"name": node_name, "type": "directory", "children": []}
+        if depth > max_depth:
+            return node
+            
+        try:
+            for item in os.listdir(current_path):
+                if item in exclude_dirs:
+                    continue
+                item_path = os.path.join(current_path, item)
+                if os.path.isdir(item_path):
+                    node["children"].append(walk_tree(item_path, depth + 1))
+                else:
+                    node["children"].append({"name": item, "type": "file"})
+        except Exception:
+            pass
+        return node
+        
+    return walk_tree(clone_path, 1)
+
+def detect_architecture(clone_path: str) -> Dict[str, Any]:
+    """
+    Scans directory hierarchy and filenames to infer repository architecture
+    and maps file paths to components (controllers, services, models, etc.).
+    """
+    components = {
+        "controllers": [],
+        "services": [],
+        "repositories": [],
+        "models": [],
+        "utilities": [],
+        "middlewares": []
+    }
+    
+    all_dirs = set()
+    all_files = []
+    
+    exclude_dirs = {".git", "node_modules", "venv", ".venv", "build", "target", "dist", "__pycache__", ".gemini"}
+    
+    for root, dirs, files in os.walk(clone_path):
+        dirs[:] = [d for d in dirs if d not in exclude_dirs]
+        for d in dirs:
+            all_dirs.add(d.lower())
+        for f in files:
+            rel_path = os.path.relpath(os.path.join(root, f), clone_path)
+            all_files.append(rel_path)
+            
+            # Map file to components based on path & name keywords
+            path_lower = rel_path.lower()
+            if any(k in path_lower for k in ["controller", "router", "route", "api/"]):
+                components["controllers"].append(rel_path)
+            elif any(k in path_lower for k in ["service", "handler", "manager", "logic"]):
+                components["services"].append(rel_path)
+            elif any(k in path_lower for k in ["repository", "dao", "query"]):
+                components["repositories"].append(rel_path)
+            elif any(k in path_lower for k in ["model", "entity", "schema", "db/"]):
+                components["models"].append(rel_path)
+            elif any(k in path_lower for k in ["util", "helper", "common", "tool"]):
+                components["utilities"].append(rel_path)
+            elif any(k in path_lower for k in ["middleware", "auth", "guard", "intercept"]):
+                components["middlewares"].append(rel_path)
+
+    # Infer architecture pattern
+    arch = "Monolithic Script / Simple Layout"
+    
+    if any(d in all_dirs for d in ["controllers", "views", "models"]):
+        arch = "MVC (Model-View-Controller)"
+    elif any(d in all_dirs for d in ["core", "infrastructure", "presentation", "domain"]):
+        arch = "Clean / Hexagonal Architecture"
+    elif any(d in all_dirs for d in ["adapters", "ports"]):
+        arch = "Hexagonal Architecture (Ports & Adapters)"
+    elif any(d in all_dirs for d in ["services", "apps"]) and len(components["controllers"]) > 10:
+        arch = "Microservices / Monorepo Layout"
+    elif len(components["services"]) > 0 and len(components["repositories"]) > 0:
+        arch = "Layered Architecture"
+    elif "frontend" in all_dirs and ("backend" in all_dirs or "api" in all_dirs):
+        arch = "Client-Server Architecture"
+        
+    return {
+        "pattern": arch,
+        "components": components
+    }
 
 def analyze_repository(clone_path: str) -> Dict[str, Any]:
     """
@@ -192,7 +281,7 @@ def analyze_repository(clone_path: str) -> Dict[str, Any]:
             filepath = os.path.join(clone_path, contributing_file)
             with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
                 content = f.read()
-                # Store first 2000 characters of guidelines
+                # Store first 3000 characters of guidelines
                 result["contribution_rules"] = content[:3000]
                 result["meta_info"]["contribution_rules_source"] = contributing_file
         except Exception as e:
@@ -203,7 +292,43 @@ def analyze_repository(clone_path: str) -> Dict[str, Any]:
     if os.path.exists(workflows_path) and os.path.isdir(workflows_path):
         try:
             result["meta_info"]["github_workflows"] = os.listdir(workflows_path)
+            result["meta_info"]["cicd_configs"] = os.listdir(workflows_path)
         except Exception as e:
             logger.error(f"Error listing github workflows: {e}")
 
+    # 4. Generate Directory Structure, Detect Architecture, Env/Lock files & Entry Points
+    exclude_dirs = {".git", "node_modules", "venv", ".venv", "build", "target", "dist", "__pycache__", ".gemini"}
+    
+    # Lock files
+    lock_files = []
+    for lf in ["package-lock.json", "yarn.lock", "pnpm-lock.yaml", "poetry.lock", "Cargo.lock", "go.sum", "composer.lock"]:
+        if lf in files:
+            lock_files.append(lf)
+    result["meta_info"]["lock_files"] = lock_files
+    
+    # Env files
+    env_files = []
+    for ef in [".env", ".env.example", ".env.local", ".env.development", ".env.production"]:
+        if ef in files:
+            env_files.append(ef)
+    result["meta_info"]["env_files"] = env_files
+
+    # Entry points
+    entry_points = []
+    for root, dirs, fnames in os.walk(clone_path):
+        dirs[:] = [d for d in dirs if d not in exclude_dirs]
+        for fn in fnames:
+            if fn in ["main.py", "app.py", "wsgi.py", "asgi.py", "index.js", "index.ts", "server.js", "server.ts", "app.js", "app.ts", "main.go", "Program.cs"]:
+                entry_points.append(os.path.relpath(os.path.join(root, fn), clone_path))
+    result["meta_info"]["entry_points"] = entry_points[:5]
+
+    # Architecture components mapping
+    arch_info = detect_architecture(clone_path)
+    result["meta_info"]["architecture"] = arch_info["pattern"]
+    result["meta_info"]["components"] = arch_info["components"]
+    
+    # Directory structure tree
+    result["meta_info"]["directory_structure"] = get_directory_structure(clone_path)
+
     return result
+

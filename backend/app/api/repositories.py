@@ -506,6 +506,15 @@ def get_repository_intelligence(
         "historical_fixes": historical_fixes,
         "tests_discovered": test_files_count,
         "index_status": "synced" if indexed_symbols > 0 else "pending",
-        "last_sync": repo.updated_at.isoformat() if repo.updated_at else None
+        "last_sync": repo.updated_at.isoformat() if repo.updated_at else None,
+        # New Phase 6 properties
+        "architecture": repo.meta_info.get("architecture") if repo.meta_info else "Monolithic Layout",
+        "components": repo.meta_info.get("components") if repo.meta_info else {},
+        "lock_files": repo.meta_info.get("lock_files") if repo.meta_info else [],
+        "env_files": repo.meta_info.get("env_files") if repo.meta_info else [],
+        "entry_points": repo.meta_info.get("entry_points") if repo.meta_info else [],
+        "cicd_configs": repo.meta_info.get("cicd_configs") if repo.meta_info else [],
+        "directory_structure": repo.meta_info.get("directory_structure") if repo.meta_info else {}
     }
+
 

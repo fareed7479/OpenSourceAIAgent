@@ -21,124 +21,189 @@ GO_FUNC_RE = re.compile(r'^func\s+(?:\([^)]+\)\s+)?([a-zA-Z0-9_]+)\s*\(')
 JAVA_CLASS_RE = re.compile(r'(?:public\s+)?class\s+([a-zA-Z0-9_]+)')
 JAVA_METHOD_RE = re.compile(r'(?:public|protected|private|static|\s)+[a-zA-Z0-9_<>]+\s+([a-zA-Z0-9_]+)\s*\([^)]*\)\s*\{')
 
+import hashlib
+
+def get_file_md5(filepath: str) -> str:
+    hash_md5 = hashlib.md5()
+    try:
+        with open(filepath, "rb") as f:
+            for chunk in iter(lambda: f.read(4096), b""):
+                hash_md5.update(chunk)
+    except Exception:
+        pass
+    return hash_md5.hexdigest()
+
 def scan_and_index_repository(repo_id: str, workspace_path: str) -> None:
     """
     Scans repository directory, extracts AST/regex symbols into CodeSearchIndex,
     generates semantic embeddings, and indexes them in the Vector Database.
+    Implements production-grade incremental indexing using file hashing.
     """
     db: Session = SessionLocal()
     vector_store = get_vector_store()
     
+    from app.models.repository import Repository
+    from app.models.extensions import CodeSymbol, CodeRelation, RepositoryEmbedding
+    
+    repo = db.query(Repository).filter(Repository.id == repo_id).first()
+    if not repo:
+        logger.error(f"Repository {repo_id} not found for indexing.")
+        db.close()
+        return
+        
+    meta_info = dict(repo.meta_info or {})
+    cached_hashes = dict(meta_info.get("file_hashes", {}))
+    
     exclude_dirs = {".git", "node_modules", "venv", ".venv", "build", "target", "dist", "__pycache__", ".gemini"}
     include_extensions = {".py", ".js", ".ts", ".tsx", ".go", ".java", ".rs", ".css", ".scss", ".html", ".vue", ".svelte", ".jsx"}
     
-    # 1. Clear old indexes for this repository
-    try:
-        db.query(CodeSearchIndex).filter(CodeSearchIndex.repository_id == repo_id).delete()
-        from app.models.extensions import CodeSymbol, CodeRelation
-        db.query(CodeSymbol).filter(CodeSymbol.repository_id == repo_id).delete()
-        db.query(CodeRelation).filter(CodeRelation.repository_id == repo_id).delete()
-        db.commit()
-    except Exception as e:
-        logger.error(f"Error clearing old indexes: {e}")
-        db.rollback()
-        
-    # Build maps of all workspace file basenames to relative paths for import resolution
+    # Track files currently present in workspace
+    current_workspace_files = {}
     all_files_map = {}
+    
+    # First pass: map all codebase files and compute hashes
     for r, ds, fs in os.walk(workspace_path):
         ds[:] = [d for d in ds if d not in exclude_dirs]
         for f in fs:
             ext = os.path.splitext(f)[1].lower()
             if ext in include_extensions:
-                r_path = os.path.relpath(os.path.join(r, f), workspace_path)
-                all_files_map[os.path.splitext(f)[0]] = r_path
+                abs_p = os.path.join(r, f)
+                rel_p = os.path.relpath(abs_p, workspace_path)
+                current_workspace_files[rel_p] = get_file_md5(abs_p)
+                all_files_map[os.path.splitext(f)[0]] = rel_p
 
-    logger.info(f"Scanning codebase for indexing symbols: {workspace_path}...")
+    # Identify modified, new, and deleted files
+    new_or_modified = []
+    for rel_path, file_hash in current_workspace_files.items():
+        if cached_hashes.get(rel_path) != file_hash:
+            new_or_modified.append(rel_path)
+            
+    deleted_files = [f for f in cached_hashes.keys() if f not in current_workspace_files]
+    
+    if not new_or_modified and not deleted_files:
+        logger.info(f"Incremental scan: No files changed in repo {repo.owner}/{repo.name}. Skipping indexing.")
+        db.close()
+        return
+        
+    logger.info(f"Incremental indexing {repo.owner}/{repo.name}: {len(new_or_modified)} updated, {len(deleted_files)} deleted.")
+    
+    # 1. Clear database entries for deleted and modified files
+    files_to_clear = new_or_modified + deleted_files
+    for filepath in files_to_clear:
+        try:
+            db.query(CodeSearchIndex).filter(
+                CodeSearchIndex.repository_id == repo_id,
+                CodeSearchIndex.filepath == filepath
+            ).delete()
+            db.query(CodeSymbol).filter(
+                CodeSymbol.repository_id == repo_id,
+                CodeSymbol.filepath == filepath
+            ).delete()
+            db.query(CodeRelation).filter(
+                CodeRelation.repository_id == repo_id,
+                (CodeRelation.source_file.startswith(filepath) | CodeRelation.target_file.startswith(filepath))
+            ).delete()
+            db.query(RepositoryEmbedding).filter(
+                RepositoryEmbedding.repository_id == repo_id,
+                RepositoryEmbedding.filepath == filepath
+            ).delete()
+        except Exception as clear_err:
+            logger.error(f"Error clearing old indexes for file {filepath}: {clear_err}")
+    db.commit()
+
+    # 2. Index new and modified files
     indexed_symbols_count = 0
     embedded_chunks_count = 0
     
-    for root, dirs, files in os.walk(workspace_path):
-        dirs[:] = [d for d in dirs if d not in exclude_dirs]
-        
-        for file in files:
-            ext = os.path.splitext(file)[1].lower()
-            if ext not in include_extensions:
+    for rel_path in new_or_modified:
+        abs_path = os.path.join(workspace_path, rel_path)
+        try:
+            with open(abs_path, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.read()
+                
+            if not content.strip():
+                cached_hashes[rel_path] = current_workspace_files[rel_path]
                 continue
-                
-            abs_path = os.path.join(root, file)
-            rel_path = os.path.relpath(abs_path, workspace_path)
+
+            # Extract AST Symbols & Imports
+            from app.services.ast_parser import ASTParser
+            from app.services.knowledge_graph import KnowledgeGraphManager
             
-            try:
-                with open(abs_path, "r", encoding="utf-8", errors="ignore") as f:
-                    content = f.read()
-                    
-                if not content.strip():
-                    continue
-
-                # 2. Extract AST Symbols & Imports
-                from app.services.ast_parser import ASTParser
-                from app.services.knowledge_graph import KnowledgeGraphManager
+            parsed_data = ASTParser.parse_file(rel_path, content)
+            symbols = []
+            lines = content.splitlines()
+            
+            # Save symbols in SQL Search Index
+            for sym in parsed_data["symbols"]:
+                sym_content = "\n".join(lines[sym["start_line"] - 1 : sym["end_line"]])
+                symbols.append((sym["name"], sym["type"], sym["start_line"], sym["end_line"], sym_content))
                 
-                parsed_data = ASTParser.parse_file(rel_path, content)
-                symbols = []
-                lines = content.splitlines()
+                record = CodeSearchIndex(
+                    repository_id=repo_id,
+                    filepath=rel_path,
+                    symbol_name=sym["name"],
+                    symbol_type=sym["type"],
+                    start_line=sym["start_line"],
+                    end_line=sym["end_line"],
+                    content=sym_content
+                )
+                db.add(record)
+                indexed_symbols_count += 1
                 
-                # Save symbols in SQL Search Index
-                for sym in parsed_data["symbols"]:
-                    sym_content = "\n".join(lines[sym["start_line"] - 1 : sym["end_line"]])
-                    symbols.append((sym["name"], sym["type"], sym["start_line"], sym["end_line"], sym_content))
-                    
-                    record = CodeSearchIndex(
-                        repository_id=repo_id,
-                        filepath=rel_path,
-                        symbol_name=sym["name"],
-                        symbol_type=sym["type"],
-                        start_line=sym["start_line"],
-                        end_line=sym["end_line"],
-                        content=sym_content
-                    )
-                    db.add(record)
-                    indexed_symbols_count += 1
-                    
-                    KnowledgeGraphManager.add_symbol(
-                        db, repo_id, rel_path, sym["name"], sym["type"], sym["start_line"], sym["end_line"]
-                    )
-                    
-                # Save API routes
-                for route in parsed_data["routes"]:
-                    KnowledgeGraphManager.add_symbol(
-                        db, repo_id, rel_path, f"{route['method']} {route['path']}", "route", 1, 1
-                    )
-                    
-                # Resolve import paths to build Knowledge Graph edges
-                for imp in parsed_data["imports"]:
-                    imp_base = os.path.splitext(os.path.basename(imp))[0]
-                    if imp_base in all_files_map:
-                        target_file = all_files_map[imp_base]
-                        # Don't add import edges to self
-                        if target_file != rel_path:
-                            KnowledgeGraphManager.add_relation(db, repo_id, rel_path, target_file, "imports")
-                    
-                # 3. Generate Semantic Embeddings for Chunks
-                # Split content into ~1000-character logical chunks for vector index
-                chunks = _chunk_code(rel_path, content, symbols)
-                for chunk_text, chunk_symbol in chunks:
-                    embedding = get_text_embedding(chunk_text)
-                    vector_store.add_embedding(
-                        repository_id=repo_id,
-                        filepath=rel_path,
-                        symbol=chunk_symbol,
-                        content=chunk_text,
-                        embedding=embedding
-                    )
-                    embedded_chunks_count += 1
+                KnowledgeGraphManager.add_symbol(
+                    db, repo_id, rel_path, sym["name"], sym["type"], sym["start_line"], sym["end_line"]
+                )
+                
+            # Save API routes
+            for route in parsed_data["routes"]:
+                KnowledgeGraphManager.add_symbol(
+                    db, repo_id, rel_path, f"{route['method']} {route['path']}", "route", 1, 1
+                )
+                
+            # Resolve import paths to build Knowledge Graph edges
+            for imp in parsed_data["imports"]:
+                imp_base = os.path.splitext(os.path.basename(imp))[0]
+                if imp_base in all_files_map:
+                    target_file = all_files_map[imp_base]
+                    if target_file != rel_path:
+                        KnowledgeGraphManager.add_relation(db, repo_id, rel_path, target_file, "imports")
+                        
+            # Save call relationships
+            for call in parsed_data.get("calls", []):
+                KnowledgeGraphManager.add_relation(
+                    db, repo_id, f"{rel_path}::{call['caller']}", f"{rel_path}::{call['callee']}", "calls"
+                )
+                
+            # Generate Semantic Embeddings for Chunks
+            chunks = _chunk_code(rel_path, content, symbols)
+            for chunk_text, chunk_symbol in chunks:
+                embedding = get_text_embedding(chunk_text)
+                vector_store.add_embedding(
+                    repository_id=repo_id,
+                    filepath=rel_path,
+                    symbol=chunk_symbol,
+                    content=chunk_text,
+                    embedding=embedding
+                )
+                embedded_chunks_count += 1
+                
+            # Update cache hash
+            cached_hashes[rel_path] = current_workspace_files[rel_path]
 
-            except Exception as file_err:
-                logger.error(f"Error indexing file {rel_path}: {file_err}")
+        except Exception as file_err:
+            logger.error(f"Error indexing file {rel_path}: {file_err}")
 
+    # Remove deleted files from hash cache
+    for f in deleted_files:
+        cached_hashes.pop(f, None)
+        
+    meta_info["file_hashes"] = cached_hashes
+    repo.meta_info = meta_info
+    
     db.commit()
     db.close()
     logger.info(f"Finished indexing repo {repo_id}. Symbols stored: {indexed_symbols_count}. Chunks embedded: {embedded_chunks_count}.")
+
 
 
 def _extract_symbols(filepath: str, content: str) -> List[Tuple[str, str, int, int, str]]:

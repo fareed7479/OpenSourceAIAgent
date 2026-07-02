@@ -319,6 +319,7 @@ class ContextAgent(AgentNode):
         state.quality_metrics = context_package["quality_metrics"]
         state.historical_fixes = context_package["historical_fixes"]
         state.readme_summary = context_package["readme_summary"]
+        state.context_package_str = context_package.get("context_package_str", "")
         retrieval_details = context_package["retrieval_details"]
         
         self._log_stage(db, state.run_id, f"Context retrieval finished. Gathered context from {len(state.relevant_files)} files.", {
@@ -402,6 +403,9 @@ class CodingAgent(AgentNode):
                 enriched_desc += f"\n  {idx}. Past Issue #{fix.get('key')}: {fix.get('fix_summary')} (Relevance: {fix.get('relevance')})"
         else:
             enriched_desc += "\n- **Relevant Historical Fixes**: None"
+
+        if hasattr(state, "context_package_str") and state.context_package_str:
+            enriched_desc += f"\n\n{state.context_package_str}"
 
         self._log_stage(db, state.run_id, f"Invoking coding provider agent '{provider}' to generate implementation changes.")
         # Generate fixes
